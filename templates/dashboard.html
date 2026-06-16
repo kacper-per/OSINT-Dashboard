@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% macro table_empty() %}<tr><td colspan="9" class="empty-table">No results collected.</td></tr>{% endmacro %}
+{% block title %}Dashboard | {{ project.company_name }}{% endblock %}
+{% block content %}
+<div class="page-heading d-lg-flex justify-content-between align-items-end">
+  <div>
+    <div class="eyebrow">Recon dashboard</div>
+    <h1>{{ project.company_name }}</h1>
+    <p class="font-monospace mb-0">{{ project.root_domain }}</p>
+  </div>
+  <div class="d-flex gap-2 mt-3 mt-lg-0">
+    <a class="btn btn-outline-light" href="{{ url_for('project_detail', project_id=project.id) }}">Project overview</a>
+    <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}">
+      <button class="btn btn-accent" type="submit">Generate report</button>
+    </form>
+  </div>
+</div>
+
+{% include "_summary_cards.html" %}
+
+<div class="row g-3 my-4">
+  <div class="col-lg-4"><div class="chart-panel"><h2>DNS record types</h2><canvas id="dnsChart"></canvas></div></div>
+  <div class="col-lg-4"><div class="chart-panel"><h2>HTTP statuses</h2><canvas id="httpChart"></canvas></div></div>
+  <div class="col-lg-4"><div class="chart-panel"><h2>Security headers</h2><canvas id="headersChart"></canvas></div></div>
+</div>
+
+<div class="panel mb-3">
+  <div class="panel-heading flex-wrap gap-2">
+    <h2>Collected evidence</h2>
+    <input class="form-control table-search" type="search" placeholder="Filter visible tables..." data-table-search>
+  </div>
+  <div class="nav nav-tabs recon-tabs px-3" role="tablist">
+    {% for tab in ["DNS Records", "Subdomains", "HTTP Results", "Security Headers", "WHOIS", "TLS Certificates", "Emails", "Raw Results"] %}
+      <button class="nav-link {% if loop.first %}active{% endif %}" data-bs-toggle="tab"
+              data-bs-target="#tab-{{ loop.index }}" type="button">{{ tab }}</button>
+    {% endfor %}
+  </div>
+  <div class="tab-content">
+    <div class="tab-pane fade show active" id="tab-1">
+      <div class="table-responsive"><table class="table table-darkish searchable mb-0">
+        <thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Source</th></tr></thead>
+        <tbody>{% for row in data.dns_records %}<tr><td><span class="type-badge">{{ row.record_type }}</span></td><td>{{ row.name }}</td><td class="break-all">{{ row.value }}</td><td>{{ row.source }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="tab-pane fade" id="tab-2">
+      <div class="table-responsive"><table class="table table-darkish searchable mb-0">
+        <thead><tr><th>Subdomain</th><th>Source</th><th>Collected</th></tr></thead>
+        <tbody>{% for row in data.subdomains %}<tr><td class="font-monospace">{{ row.subdomain }}</td><td>{{ row.source }}</td><td>{{ row.created_at }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="tab-pane fade" id="tab-3">
+      <div class="table-responsive"><table class="table table-darkish searchable mb-0">
+        <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th><th>Final URL</th><th>HTTPS</th></tr></thead>
+        <tbody>{% for row in data.http_results %}<tr><td>{{ row.url }}</td><td>{{ row.status_code or "-" }}</td><td>{{ row.title or "-" }}</td><td>{{ row.server_header or "-" }}</td><td class="break-all">{{ row.final_url or "-" }}</td><td>{{ "Yes" if row.https_available else "No" }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="tab-pane fade" id="tab-4">
+      <div class="table-responsive"><table class="table table-darkish searchable mb-0">
+        <thead><tr><th>URL</th><th>Header</th><th>Present</th><th>Value</th></tr></thead>
+        <tbody>{% for row in data.security_headers %}<tr><td>{{ row.url }}</td><td>{{ row.header_name }}</td><td><span class="presence presence-{{ row.present }}">{{ "Present" if row.present else "Missing" }}</span></td><td class="break-all">{{ row.header_value or "-" }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="tab-pane fade p-3" id="tab-5">
+      {% for row in data.whois_results %}<pre class="raw-output searchable">{{ row.raw_text }}</pre>{% else %}<div class="empty-inline">No WHOIS result collected.</div>{% endfor %}
+    </div>
+    <div class="tab-pane fade" id="tab-6">
+      <div class="table-responsive"><table class="table table-darkish searchable mb-0">
+        <thead><tr><th>Hostname</th><th>Issuer</th><th>Subject</th><th>Valid from</th><th>Valid until</th><th>SANs</th></tr></thead>
+        <tbody>{% for row in data.tls_certificates %}<tr><td>{{ row.hostname }}</td><td>{{ row.issuer }}</td><td>{{ row.subject }}</td><td>{{ row.not_before }}</td><td>{{ row.not_after }}</td><td class="break-all">{{ row.san_names }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="tab-pane fade" id="tab-7">
+      <div class="table-responsive"><table class="table table-darkish searchable mb-0">
+        <thead><tr><th>Email</th><th>Source</th><th>Collected</th></tr></thead>
+        <tbody>{% for row in data.emails %}<tr><td>{{ row.email }}</td><td>{{ row.source }}</td><td>{{ row.created_at }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="tab-pane fade p-3" id="tab-8">
+      {% for row in data.raw_results %}
+        <div class="raw-result searchable"><strong>{{ row.module_name }}</strong><span>{{ row.created_at }}</span><pre>{{ row.raw_output }}</pre></div>
+      {% else %}<div class="empty-inline">No module warnings or raw output.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+
+<script id="chart-data" type="application/json">{{ charts_json|safe }}</script>
+{% endblock %}
