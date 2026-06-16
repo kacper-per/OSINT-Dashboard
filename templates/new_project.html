@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}New Project | OSINT Recon Dashboard{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <div class="page-heading">
+      <div class="eyebrow">New scope</div>
+      <h1>Create a recon project</h1>
+      <p>Use a root domain only. Scans query public sources and perform basic HTTP checks.</p>
+    </div>
+    <form method="post" class="panel p-4">
+      <div class="mb-3">
+        <label class="form-label" for="company_name">Company or organization</label>
+        <input class="form-control form-control-lg" id="company_name" name="company_name"
+               value="{{ request.form.get('company_name', '') }}" placeholder="Example Organization" required>
+      </div>
+      <div class="mb-4">
+        <label class="form-label" for="root_domain">Root domain</label>
+        <input class="form-control form-control-lg font-monospace" id="root_domain" name="root_domain"
+               value="{{ request.form.get('root_domain', '') }}" placeholder="example.com" required>
+        <div class="form-text">Do not include <code>https://</code>, paths, or wildcards.</div>
+      </div>
+      <div class="scope-confirmation mb-4">
+        By creating this project, you confirm that the domain is owned by you or approved for assessment.
+      </div>
+      <button class="btn btn-accent" type="submit">Create project</button>
+      <a class="btn btn-link text-secondary" href="{{ url_for('index') }}">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}
