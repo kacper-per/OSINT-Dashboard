@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ project.company_name }} | OSINT Recon Dashboard{% endblock %}
+{% block content %}
+<div class="page-heading d-lg-flex justify-content-between align-items-end">
+  <div>
+    <div class="eyebrow">Project {{ project.id }}</div>
+    <h1>{{ project.company_name }}</h1>
+    <p class="font-monospace mb-0">{{ project.root_domain }}</p>
+  </div>
+  <div class="d-flex gap-2 mt-3 mt-lg-0">
+    <a class="btn btn-outline-light" href="{{ url_for('dashboard', project_id=project.id) }}">Open dashboard</a>
+    <form method="post" action="{{ url_for('run_scan', project_id=project.id) }}"
+          data-confirm="Run passive recon now? Existing project results will be refreshed.">
+      <button class="btn btn-accent" type="submit">Run reconnaissance</button>
+    </form>
+  </div>
+</div>
+
+{% include "_summary_cards.html" %}
+
+<div class="row g-4 mt-1">
+  <div class="col-lg-7">
+    <div class="panel h-100">
+      <div class="panel-heading">
+        <h2>Scan history</h2>
+        <span>{{ scan_runs|length }} recent runs</span>
+      </div>
+      {% if scan_runs %}
+        <div class="table-responsive">
+          <table class="table table-darkish align-middle mb-0">
+            <thead><tr><th>Started</th><th>Finished</th><th>Status</th></tr></thead>
+            <tbody>
+              {% for scan in scan_runs %}
+                <tr>
+                  <td>{{ scan.started_at }}</td>
+                  <td>{{ scan.finished_at or "In progress" }}</td>
+                  <td><span class="status-badge status-{{ scan.status }}">{{ scan.status|replace("_", " ") }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty-inline">No scans yet. Run reconnaissance to populate the dashboard.</div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="panel h-100">
+      <div class="panel-heading">
+        <h2>Reports</h2>
+        <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}">
+          <button class="btn btn-sm btn-outline-light" type="submit">Generate HTML</button>
+        </form>
+      </div>
+      {% if reports %}
+        <div class="list-group list-group-flush">
+          {% for report in reports %}
+            <a class="report-link" href="{{ url_for('view_report', filename=report) }}" target="_blank">
+              <span>{{ report }}</span><span>&nearr;</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-inline">Generate a portable report after the first scan.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
