@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OSINT Recon Report - {{ project.company_name }}</title>
+  <style>
+    body { font: 14px/1.5 Arial, sans-serif; color: #17212b; max-width: 1100px; margin: 40px auto; padding: 0 24px; }
+    h1, h2 { color: #102a43; } h2 { margin-top: 32px; border-bottom: 2px solid #d9e2ec; padding-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+    th, td { border: 1px solid #bcccdc; text-align: left; padding: 6px; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #eaf0f6; } pre { white-space: pre-wrap; background: #f3f6f9; padding: 12px; overflow-wrap: anywhere; }
+    .meta { background: #eaf0f6; padding: 16px; } .note { border-left: 4px solid #d69e2e; padding: 10px 14px; background: #fffaf0; }
+    .summary { display: flex; gap: 10px; flex-wrap: wrap; }.summary div { background: #102a43; color: white; padding: 10px 18px; }
+    @media print { body { margin: 0; max-width: none; } }
+  </style>
+</head>
+<body>
+  <h1>OSINT Reconnaissance Report</h1>
+  <div class="meta">
+    <strong>Organization:</strong> {{ project.company_name }}<br>
+    <strong>Root domain:</strong> {{ project.root_domain }}<br>
+    <strong>Project created:</strong> {{ project.created_at }}<br>
+    <strong>Latest scan:</strong> {{ latest_scan.finished_at if latest_scan else "No completed scan" }}
+  </div>
+
+  <h2>Scope and Sources</h2>
+  <p>The scope is limited to <strong>{{ project.root_domain }}</strong> and names discovered for that root domain.
+    Sources used: public DNS, crt.sh certificate transparency, public WHOIS data, public website content,
+    HTTP response metadata, and publicly presented TLS certificates.</p>
+  <div class="summary">
+    <div>{{ summary.subdomains }} subdomains</div><div>{{ summary.dns_records }} DNS records</div>
+    <div>{{ summary.http_results }} HTTP results</div><div>{{ summary.emails }} public emails</div>
+    <div>{{ summary.missing_headers }} missing headers</div>
+  </div>
+
+  <h2>DNS Records</h2>
+  <table><thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Source</th></tr></thead><tbody>
+    {% for row in data.dns_records %}<tr><td>{{ row.record_type }}</td><td>{{ row.name }}</td><td>{{ row.value }}</td><td>{{ row.source }}</td></tr>{% else %}<tr><td colspan="4">No results.</td></tr>{% endfor %}
+  </tbody></table>
+
+  <h2>Discovered Subdomains</h2>
+  <table><thead><tr><th>Subdomain</th><th>Source</th></tr></thead><tbody>
+    {% for row in data.subdomains %}<tr><td>{{ row.subdomain }}</td><td>{{ row.source }}</td></tr>{% else %}<tr><td colspan="2">No results.</td></tr>{% endfor %}
+  </tbody></table>
+
+  <h2>HTTP/HTTPS Results</h2>
+  <table><thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th><th>Final URL</th><th>HTTPS available</th></tr></thead><tbody>
+    {% for row in data.http_results %}<tr><td>{{ row.url }}</td><td>{{ row.status_code }}</td><td>{{ row.title }}</td><td>{{ row.server_header }}</td><td>{{ row.final_url }}</td><td>{{ "Yes" if row.https_available else "No" }}</td></tr>{% else %}<tr><td colspan="6">No results.</td></tr>{% endfor %}
+  </tbody></table>
+
+  <h2>Security Headers</h2>
+  <table><thead><tr><th>URL</th><th>Header</th><th>Present</th><th>Value</th></tr></thead><tbody>
+    {% for row in data.security_headers %}<tr><td>{{ row.url }}</td><td>{{ row.header_name }}</td><td>{{ "Yes" if row.present else "No" }}</td><td>{{ row.header_value }}</td></tr>{% else %}<tr><td colspan="4">No results.</td></tr>{% endfor %}
+  </tbody></table>
+
+  <h2>WHOIS</h2>
+  {% for row in data.whois_results %}<pre>{{ row.raw_text }}</pre>{% else %}<p>No WHOIS data available.</p>{% endfor %}
+
+  <h2>TLS Certificates</h2>
+  <table><thead><tr><th>Hostname</th><th>Issuer</th><th>Subject</th><th>Valid from</th><th>Valid until</th><th>SAN names</th></tr></thead><tbody>
+    {% for row in data.tls_certificates %}<tr><td>{{ row.hostname }}</td><td>{{ row.issuer }}</td><td>{{ row.subject }}</td><td>{{ row.not_before }}</td><td>{{ row.not_after }}</td><td>{{ row.san_names }}</td></tr>{% else %}<tr><td colspan="6">No results.</td></tr>{% endfor %}
+  </tbody></table>
+
+  <h2>Public Emails</h2>
+  <table><thead><tr><th>Email</th><th>Source</th></tr></thead><tbody>
+    {% for row in data.emails %}<tr><td>{{ row.email }}</td><td>{{ row.source }}</td></tr>{% else %}<tr><td colspan="2">No results.</td></tr>{% endfor %}
+  </tbody></table>
+
+  <h2>Limitations</h2>
+  <p>Public data may be stale, incomplete, redacted, or misleading. Missing results do not prove that an asset or
+    control is absent. HTTP checks are limited to discovered hostnames and do not test vulnerabilities. The tool
+    intentionally avoids aggressive crawling, port scanning, authentication, exploitation, and paid data sources.</p>
+
+  <h2>Ethical and Legal Note</h2>
+  <div class="note">This tool performs passive OSINT reconnaissance using public sources and basic non-invasive HTTP
+    checks. It does not exploit vulnerabilities, brute-force credentials, attack systems, bypass authentication, or
+    perform aggressive scanning. Use it only for educational purposes, authorized assessments, or domains owned or
+    approved by the user.</div>
+</body>
+</html>
