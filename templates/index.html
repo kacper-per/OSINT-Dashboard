@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Projects | OSINT Recon Dashboard{% endblock %}
+{% block content %}
+<div class="hero-panel mb-4">
+  <div>
+    <div class="eyebrow">Passive reconnaissance workspace</div>
+    <h1>Map the public footprint before the assessment begins.</h1>
+    <p>Create a scoped project, collect public signals, and keep the evidence in one local dashboard.</p>
+  </div>
+  <a class="btn btn-accent btn-lg" href="{{ url_for('new_project') }}">Create project</a>
+</div>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h2 class="h4 mb-0">Projects</h2>
+  <span class="text-secondary">{{ projects|length }} total</span>
+</div>
+
+{% if projects %}
+  <div class="row g-3">
+    {% for project in projects %}
+      <div class="col-md-6 col-xl-4">
+        <a class="project-card" href="{{ url_for('project_detail', project_id=project.id) }}">
+          <div class="d-flex justify-content-between align-items-start">
+            <span class="domain-pill">{{ project.root_domain }}</span>
+            <span class="project-arrow">&rarr;</span>
+          </div>
+          <h3>{{ project.company_name }}</h3>
+          <div class="project-meta">
+            <span>{{ project.scan_count }} scan{% if project.scan_count != 1 %}s{% endif %}</span>
+            <span>Last: {{ project.last_scan or "Never" }}</span>
+          </div>
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state">
+    <h2>No projects yet</h2>
+    <p>Start with an organization name and a root domain you are authorized to assess.</p>
+    <a class="btn btn-accent" href="{{ url_for('new_project') }}">Create the first project</a>
+  </div>
+{% endif %}
+{% endblock %}
