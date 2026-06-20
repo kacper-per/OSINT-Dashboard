@@ -12,6 +12,8 @@ class Config:
     REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "8"))
     TLS_TIMEOUT = int(os.environ.get("TLS_TIMEOUT", "6"))
     MAX_SUBDOMAINS_TO_PROBE = int(os.environ.get("MAX_SUBDOMAINS_TO_PROBE", "50"))
+    EMAIL_CRAWL_MAX_PAGES = int(os.environ.get("EMAIL_CRAWL_MAX_PAGES", "100"))
+    EMAIL_CRAWL_MAX_BYTES = int(os.environ.get("EMAIL_CRAWL_MAX_BYTES", "1048576"))
     CRTSH_TIMEOUT = int(os.environ.get("CRTSH_TIMEOUT", "30"))
     SCAN_HISTORY_LIMIT = int(os.environ.get("SCAN_HISTORY_LIMIT", "5"))
     REPORT_LIMIT = int(os.environ.get("REPORT_LIMIT", "10"))

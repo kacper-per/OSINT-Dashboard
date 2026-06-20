@@ -18,6 +18,7 @@ does not require API keys or paid services.
 - Public WHOIS data
 - Publicly presented TLS certificate details and SAN names
 - Email addresses displayed on the root-domain homepage
+- Optional deep email search across in-scope HTML pages for a selected scan
 
 Results are deduplicated per scan and stored locally in SQLite. A failed module
 does not stop the rest of a scan; warnings are saved under **Raw Results** and
@@ -62,7 +63,9 @@ On Windows PowerShell, activate the environment with:
 4. Review normalized results in the dashboard.
 5. Run additional scans to build the last-five-scan history and compare the
    latest scan with the previous one.
-6. Select **Generate report** to create a timestamped HTML snapshot for a
+6. In the **Emails** tab, optionally select **DEEP SEARCH FOR EMAILS** to crawl
+   in-scope HTML pages for additional public email addresses.
+7. Select **Generate report** to create a timestamped HTML snapshot for a
    specific scan.
 
 Scans and reports are numbered per project. The database still keeps internal
@@ -89,6 +92,8 @@ These optional environment variables control local behavior:
 | `REQUEST_TIMEOUT` | `8` | Network timeout in seconds |
 | `TLS_TIMEOUT` | `6` | TLS connection timeout in seconds |
 | `MAX_SUBDOMAINS_TO_PROBE` | `50` | Limits basic HTTP/TLS checks per scan |
+| `EMAIL_CRAWL_MAX_PAGES` | `100` | Max in-scope HTML pages for manual deep email search |
+| `EMAIL_CRAWL_MAX_BYTES` | `1048576` | Max bytes read from one crawled HTML page |
 | `CRTSH_TIMEOUT` | `30` | Timeout for crt.sh subdomain discovery |
 | `SCAN_HISTORY_LIMIT` | `5` | Number of scan result snapshots kept per project |
 | `REPORT_LIMIT` | `10` | Number of HTML report files kept per project |
@@ -140,7 +145,9 @@ pytest
 - HTML reports are independent snapshots and are kept according to
   `REPORT_LIMIT`; report records may outlive the scan data they were generated
   from.
-- The email finder inspects only the homepage and does not crawl the site.
+- The standard reconnaissance email finder inspects only the homepage. The
+  optional deep email search crawls in-scope HTML pages only when manually
+  triggered from a scan dashboard.
 - HTTP probing checks only HTTP and HTTPS. It is not a port scanner.
 - WHOIS availability and format vary by registry.
 - TLS collection requires a valid certificate trusted by the local system.

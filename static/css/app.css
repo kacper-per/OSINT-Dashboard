@@ -41,6 +41,8 @@ body { background: radial-gradient(circle at 80% 0, #15314a 0, var(--bg) 35%); c
 .table-darkish td, .table-darkish th { padding: .8rem 1rem; }.break-all { overflow-wrap: anywhere; min-width: 160px; }
 .empty-inline, .empty-table { padding: 2rem !important; color: var(--muted) !important; text-align: center; }
 .status-badge, .presence { border-radius: 20px; padding: .25rem .55rem; font-size: .72rem; text-transform: capitalize; white-space: nowrap; }
+.header-cell { min-width: 180px; }
+.header-cell .presence { display: inline-block; max-width: 320px; overflow-wrap: anywhere; text-transform: none; white-space: normal; }
 .status-completed, .presence-1 { background: #123d32; color: #86efcf; }
 .status-completed_with_errors, .presence-0 { background: #493716; color: #ffd67c; }
 .status-running { background: #173b5c; color: #8bd0ff; }
@@ -63,6 +65,9 @@ body { background: radial-gradient(circle at 80% 0, #15314a 0, var(--bg) 35%); c
 .recon-tabs { border-color: var(--border); flex-wrap: nowrap; overflow-x: auto; }
 .recon-tabs .nav-link { color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; font-size: .82rem; padding: .9rem; }
 .recon-tabs .nav-link.active { color: var(--accent); background: transparent; border-color: var(--accent); }
+.tab-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border); }
+.tab-action-bar strong { display: block; color: var(--text); margin-bottom: .25rem; }
+.tab-action-bar span { color: var(--muted); font-size: .8rem; }
 .table-search { max-width: 260px; background: #0b1725; border-color: var(--border); color: var(--text); }
 .table-search:focus { background: #0b1725; border-color: var(--accent); color: var(--text); box-shadow: none; }
 .raw-output, .raw-result pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #cbd8e6; background: #091421; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; font-size: .76rem; }
@@ -92,5 +97,6 @@ body { background: radial-gradient(circle at 80% 0, #15314a 0, var(--bg) 35%); c
 @media (max-width: 768px) {
   .hero-panel { padding: 2rem; display: block; }.hero-panel .btn { margin-top: 1rem; }
   .project-meta { display: block; }.project-meta span { display: block; margin-top: .3rem; }
+  .tab-action-bar { align-items: flex-start; flex-direction: column; }
   .project-management { align-items: flex-start; flex-direction: column; }
 }

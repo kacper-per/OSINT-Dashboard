@@ -143,6 +143,7 @@ def create_app(test_config=None):
         source_warnings = scan_source_warnings(data)
         scan_runs = database.list_scan_runs(project_id, app.config["SCAN_HISTORY_LIMIT"])
         report_count = database.count_reports(project_id)
+        security_header_matrix = build_security_header_matrix(data["security_headers"])
         return render_template(
             "dashboard.html",
             project=project,
@@ -152,8 +153,50 @@ def create_app(test_config=None):
             selected_scan=selected_scan,
             scan_runs=scan_runs,
             report_count=report_count,
+            security_header_names=security_headers.SECURITY_HEADERS,
+            security_header_matrix=security_header_matrix,
             charts_json=json.dumps(charts),
         )
+
+    @app.post("/projects/<int:project_id>/scans/<int:scan_id>/emails/deep-search")
+    def deep_search_emails(project_id, scan_id):
+        project = get_project_or_404(project_id)
+        scan = get_scan_or_404(project_id, scan_id)
+        if scan["status"] == "running":
+            flash("Wait for the scan to finish before running deep email search.", "warning")
+            return redirect(url_for("dashboard", project_id=project_id, scan_id=scan_id) + "#tab-7")
+
+        before_count = database.scan_summary(scan_id)["emails"]
+        try:
+            emails, stats = email_finder.deep_search_emails(
+                project["root_domain"],
+                app.config["REQUEST_TIMEOUT"],
+                app.config["USER_AGENT"],
+                max_pages=app.config["EMAIL_CRAWL_MAX_PAGES"],
+                max_bytes=app.config["EMAIL_CRAWL_MAX_BYTES"],
+            )
+            database.insert_rows(
+                "emails",
+                ("scan_run_id", "project_id", "email", "source", "created_at"),
+                [
+                    (scan_id, project_id, row["email"], row["source"], database.utc_now())
+                    for row in emails
+                ],
+            )
+            if stats["errors"]:
+                record_raw(project_id, scan_id, "email_deep_search", "\n".join(stats["errors"]))
+            after_count = database.scan_summary(scan_id)["emails"]
+            flash(
+                (
+                    f"Deep email search checked {stats['pages_checked']} page(s), "
+                    f"found {len(emails)} email(s), and added {after_count - before_count} new email(s)."
+                ),
+                "success",
+            )
+        except Exception as exc:
+            record_raw(project_id, scan_id, "email_deep_search_error", exc)
+            flash("Deep email search failed. Details are in Raw Results.", "danger")
+        return redirect(url_for("dashboard", project_id=project_id, scan_id=scan_id) + "#tab-7")
 
     @app.route("/projects/<int:project_id>/compare")
     def compare_scans(project_id):
@@ -577,6 +620,8 @@ def create_app(test_config=None):
             summary=summary,
             latest_scan=scan,
             report_name=display_name,
+            security_header_names=security_headers.SECURITY_HEADERS,
+            security_header_matrix=build_security_header_matrix(data["security_headers"]),
         )
         report_path = Path(app.config["REPORTS_DIR"]) / filename
         report_path.write_text(content, encoding="utf-8")
@@ -638,6 +683,29 @@ def parse_scan_ids(values):
         except (TypeError, ValueError):
             continue
     return scan_ids
+
+
+def build_security_header_matrix(rows):
+    matrix = {}
+    for row in rows:
+        url = row["url"]
+        header_name = row["header_name"]
+        matrix.setdefault(
+            url,
+            {
+                header: {"present": False, "value": ""}
+                for header in security_headers.SECURITY_HEADERS
+            },
+        )
+        matrix[url][header_name] = {
+            "present": bool(row["present"]),
+            "value": row["header_value"] or "",
+        }
+
+    return [
+        {"url": url, "headers": matrix[url]}
+        for url in sorted(matrix)
+    ]
 
 
 def scan_source_warnings(data):

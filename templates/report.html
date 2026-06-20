@@ -9,6 +9,8 @@
     table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
     th, td { border: 1px solid #bcccdc; text-align: left; padding: 6px; vertical-align: top; overflow-wrap: anywhere; }
     th { background: #eaf0f6; } pre { white-space: pre-wrap; background: #f3f6f9; padding: 12px; overflow-wrap: anywhere; }
+    .present, .missing { display: inline-block; border-radius: 12px; padding: 2px 7px; overflow-wrap: anywhere; }
+    .present { background: #dff7ea; color: #0f5132; }.missing { background: #fff3cd; color: #8a5a00; }
     .meta { background: #eaf0f6; padding: 16px; } .note { border-left: 4px solid #d69e2e; padding: 10px 14px; background: #fffaf0; }
     .summary { display: flex; gap: 10px; flex-wrap: wrap; }.summary div { background: #102a43; color: white; padding: 10px 18px; }
     @media print { body { margin: 0; max-width: none; } }
@@ -50,8 +52,16 @@
   </tbody></table>
 
   <h2>Security Headers</h2>
-  <table><thead><tr><th>URL</th><th>Header</th><th>Present</th><th>Value</th></tr></thead><tbody>
-    {% for row in data.security_headers %}<tr><td>{{ row.url }}</td><td>{{ row.header_name }}</td><td>{{ "Yes" if row.present else "No" }}</td><td>{{ row.header_value }}</td></tr>{% else %}<tr><td colspan="4">No results.</td></tr>{% endfor %}
+  <table><thead><tr><th>URL</th>{% for header in security_header_names %}<th>{{ header }}</th>{% endfor %}</tr></thead><tbody>
+    {% for row in security_header_matrix %}
+      <tr>
+        <td>{{ row.url }}</td>
+        {% for header in security_header_names %}
+          {% set item = row["headers"][header] %}
+          <td><span class="{{ 'present' if item.present else 'missing' }}">{{ item.value if item.present else "Missing" }}</span></td>
+        {% endfor %}
+      </tr>
+    {% else %}<tr><td colspan="{{ security_header_names|length + 1 }}">No results.</td></tr>{% endfor %}
   </tbody></table>
 
   <h2>WHOIS</h2>

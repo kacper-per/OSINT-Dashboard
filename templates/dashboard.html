@@ -109,8 +109,29 @@
     </div>
     <div class="tab-pane fade" id="tab-4">
       <div class="table-responsive"><table class="table table-darkish searchable mb-0">
-        <thead><tr><th>URL</th><th>Header</th><th>Present</th><th>Value</th></tr></thead>
-        <tbody>{% for row in data.security_headers %}<tr><td>{{ row.url }}</td><td>{{ row.header_name }}</td><td><span class="presence presence-{{ row.present }}">{{ "Present" if row.present else "Missing" }}</span></td><td class="break-all">{{ row.header_value or "-" }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>
+        <thead>
+          <tr>
+            <th>URL</th>
+            {% for header in security_header_names %}<th>{{ header }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in security_header_matrix %}
+            <tr>
+              <td class="break-all">{{ row.url }}</td>
+              {% for header in security_header_names %}
+                {% set item = row["headers"][header] %}
+                <td class="header-cell">
+                  <span class="presence presence-{{ 1 if item.present else 0 }}">
+                    {{ item.value if item.present else "Missing" }}
+                  </span>
+                </td>
+              {% endfor %}
+            </tr>
+          {% else %}
+            <tr><td colspan="{{ security_header_names|length + 1 }}" class="empty-table">No results collected.</td></tr>
+          {% endfor %}
+        </tbody>
       </table></div>
     </div>
     <div class="tab-pane fade p-3" id="tab-5">
@@ -123,6 +144,26 @@
       </table></div>
     </div>
     <div class="tab-pane fade" id="tab-7">
+      <div class="tab-action-bar">
+        <div>
+          <strong>Deep email search</strong>
+          <span>Crawls in-scope HTML pages for this scan, up to {{ config.EMAIL_CRAWL_MAX_PAGES }} pages.</span>
+        </div>
+        {% if selected_scan and selected_scan.status != "running" %}
+          <form method="post"
+                action="{{ url_for('deep_search_emails', project_id=project.id, scan_id=selected_scan.id) }}"
+                data-confirm="Run deep email search for {{ project.root_domain }}?"
+                data-confirm-title="Deep email search"
+                data-confirm-body="This will crawl in-scope HTML pages on {{ project.root_domain }} and save any public email addresses to scan #{{ selected_scan.scan_number }}."
+                data-confirm-button="Start deep search"
+                data-busy-label="Searching emails...">
+            <button class="btn btn-sm btn-accent" type="submit">
+              <span class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true" data-busy-spinner></span>
+              <span data-busy-text>DEEP SEARCH FOR EMAILS</span>
+            </button>
+          </form>
+        {% endif %}
+      </div>
       <div class="table-responsive"><table class="table table-darkish searchable mb-0">
         <thead><tr><th>Email</th><th>Source</th><th>Collected</th></tr></thead>
         <tbody>{% for row in data.emails %}<tr><td>{{ row.email }}</td><td>{{ row.source }}</td><td>{{ row.created_at }}</td></tr>{% else %}{{ table_empty() }}{% endfor %}</tbody>

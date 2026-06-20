@@ -4,7 +4,7 @@ import pytest
 import requests
 
 import database
-from app import create_app
+from app import build_security_header_matrix, create_app
 from modules import (
     crtsh_lookup,
     dns_lookup,
@@ -48,6 +48,101 @@ def test_crtsh_timeout_backoff(monkeypatch):
     assert subdomains == ["api.example.com", "www.example.com"]
 
 
+def test_deep_email_search_crawls_in_scope_html(monkeypatch):
+    pages = {
+        "https://example.com": (
+            '<a href="/contact">Contact</a>'
+            '<a href="https://outside.example.net/team">External</a>'
+            "admin@example.com"
+        ),
+        "http://example.com": "",
+        "https://example.com/contact": "sales@example.com <a href='/brochure.pdf'>PDF</a>",
+    }
+    requested_urls = []
+
+    class RawBody:
+        decode_content = False
+
+        def __init__(self, text):
+            self.text = text
+
+        def read(self, _max_bytes, decode_content=True):
+            return self.text.encode()
+
+    class Response:
+        status_code = 200
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        encoding = "utf-8"
+
+        def __init__(self, url, text):
+            self.url = url
+            self.raw = RawBody(text)
+
+        def raise_for_status(self):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_get(url, **_kwargs):
+        requested_urls.append(url)
+        if url not in pages:
+            raise requests.ConnectionError(f"unexpected url {url}")
+        return Response(url, pages[url])
+
+    monkeypatch.setattr(email_finder.requests, "get", fake_get)
+
+    results, stats = email_finder.deep_search_emails(
+        "example.com",
+        timeout=1,
+        max_pages=3,
+    )
+
+    assert stats["pages_checked"] == 3
+    assert {row["email"] for row in results} == {"admin@example.com", "sales@example.com"}
+    assert "https://outside.example.net/team" not in requested_urls
+
+
+def test_whois_lookup_returns_raw_text(monkeypatch):
+    monkeypatch.setattr(
+        whois_lookup.whois,
+        "whois",
+        lambda domain, inc_raw=False: {"raw": "Domain Name: EXAMPLE.COM\nRegistrar: Test"},
+    )
+
+    assert whois_lookup.lookup_whois("example.com") == "Domain Name: EXAMPLE.COM\nRegistrar: Test"
+
+
+def test_security_header_matrix_groups_rows_by_url():
+    rows = [
+        {
+            "url": "https://example.com",
+            "header_name": "Content-Security-Policy",
+            "header_value": "default-src 'self'",
+            "present": 1,
+        },
+        {
+            "url": "https://example.com",
+            "header_name": "Strict-Transport-Security",
+            "header_value": "",
+            "present": 0,
+        },
+    ]
+
+    matrix = build_security_header_matrix(rows)
+
+    assert len(matrix) == 1
+    assert matrix[0]["url"] == "https://example.com"
+    assert matrix[0]["headers"]["Content-Security-Policy"] == {
+        "present": True,
+        "value": "default-src 'self'",
+    }
+    assert matrix[0]["headers"]["Strict-Transport-Security"] == {
+        "present": False,
+        "value": "",
+    }
+
+
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
     monkeypatch.setattr(
@@ -81,7 +176,7 @@ def app(tmp_path, monkeypatch):
             [],
         ),
     )
-    monkeypatch.setattr(whois_lookup, "lookup_whois", lambda domain: '{"domain_name": "example.com"}')
+    monkeypatch.setattr(whois_lookup, "lookup_whois", lambda domain: "Domain Name: EXAMPLE.COM")
     monkeypatch.setattr(
         tls_info,
         "fetch_tls_certificate",
@@ -98,6 +193,14 @@ def app(tmp_path, monkeypatch):
         email_finder,
         "find_homepage_emails",
         lambda domain, timeout, user_agent: (["hello@example.com"], f"https://{domain}/", []),
+    )
+    monkeypatch.setattr(
+        email_finder,
+        "deep_search_emails",
+        lambda domain, timeout, user_agent, max_pages, max_bytes: (
+            [{"email": "deep@example.com", "source": f"https://{domain}/contact"}],
+            {"pages_checked": 2, "errors": []},
+        ),
     )
 
     return create_app(
@@ -149,6 +252,8 @@ def test_scan_populates_dashboard_and_report(app, client):
     assert b"Passive recon completed successfully" in scan.data
     assert b"www.example.com" in scan.data
     assert b"hello@example.com" in scan.data
+    assert b"<th>Content-Security-Policy</th>" in scan.data
+    assert b"<th>Header</th><th>Present</th><th>Value</th>" not in scan.data
 
     with app.app_context():
         db = database.get_db()
@@ -172,6 +277,8 @@ def test_scan_populates_dashboard_and_report(app, client):
     opened = client.get(f"/reports/{report_row['filename']}")
     assert opened.status_code == 200
     assert b"OSINT report - example.com" in opened.data
+    assert b"<th>Content-Security-Policy</th>" in opened.data
+    assert b"<th>Header</th><th>Present</th><th>Value</th>" not in opened.data
 
 
 def test_scan_history_keeps_last_five_runs(app, client):
@@ -380,6 +487,28 @@ def test_report_requires_explicit_intent(app, client):
 
     with app.app_context():
         assert database.get_db().execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
+
+
+def test_deep_email_search_adds_emails_to_selected_scan(app, client):
+    create_project(client)
+    client.post("/projects/1/scan", follow_redirects=True)
+
+    response = client.post(
+        "/projects/1/scans/1/emails/deep-search",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Deep email search checked 2 page" in response.data
+    assert b"deep@example.com" in response.data
+
+    with app.app_context():
+        rows = database.get_db().execute(
+            "SELECT email, source FROM emails WHERE scan_run_id = 1 ORDER BY email"
+        ).fetchall()
+        assert [(row["email"], row["source"]) for row in rows] == [
+            ("deep@example.com", "https://example.com/contact"),
+            ("hello@example.com", "https://example.com/"),
+        ]
 
 
 def test_duplicate_project_is_rejected(client):

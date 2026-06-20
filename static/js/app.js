@@ -95,6 +95,14 @@ document.querySelectorAll("[data-select-all]").forEach((checkbox) => {
   });
 });
 
+if (window.location.hash && window.bootstrap) {
+  const tabTrigger = Array.from(document.querySelectorAll("[data-bs-target]"))
+    .find((button) => button.dataset.bsTarget === window.location.hash);
+  if (tabTrigger) {
+    new bootstrap.Tab(tabTrigger).show();
+  }
+}
+
 const searchInput = document.querySelector("[data-table-search]");
 if (searchInput) {
   searchInput.addEventListener("input", () => {
