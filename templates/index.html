@@ -12,27 +12,56 @@
 
 <div class="d-flex align-items-center justify-content-between mb-3">
   <h2 class="h4 mb-0">Projects</h2>
-  <span class="text-secondary">{{ projects|length }} total</span>
+  <div class="view-toolbar">
+    <span class="text-secondary">{{ projects|length }} total</span>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Project view mode">
+      <a class="btn btn-outline-light {% if view_mode == 'cards' %}active{% endif %}"
+         href="{{ url_for('index', view='cards') }}">Cards</a>
+      <a class="btn btn-outline-light {% if view_mode == 'list' %}active{% endif %}"
+         href="{{ url_for('index', view='list') }}">List</a>
+    </div>
+  </div>
 </div>
 
 {% if projects %}
-  <div class="row g-3">
-    {% for project in projects %}
-      <div class="col-md-6 col-xl-4">
-        <a class="project-card" href="{{ url_for('project_detail', project_id=project.id) }}">
-          <div class="d-flex justify-content-between align-items-start">
-            <span class="domain-pill">{{ project.root_domain }}</span>
-            <span class="project-arrow">&rarr;</span>
-          </div>
-          <h3>{{ project.company_name }}</h3>
-          <div class="project-meta">
-            <span>{{ project.scan_count }} scan{% if project.scan_count != 1 %}s{% endif %}</span>
-            <span>Last: {{ project.last_scan or "Never" }}</span>
-          </div>
-        </a>
+  {% if view_mode == "list" %}
+    <div class="panel">
+      <div class="table-responsive">
+        <table class="table table-darkish align-middle mb-0">
+          <thead><tr><th>Project</th><th>Root domain</th><th>Scans</th><th>Last scan</th><th>Actions</th></tr></thead>
+          <tbody>
+            {% for project in projects %}
+              <tr>
+                <td>{{ project.company_name }}</td>
+                <td><span class="domain-pill">{{ project.root_domain }}</span></td>
+                <td>{{ project.scan_count }}</td>
+                <td>{{ project.last_scan or "Never" }}</td>
+                <td><a class="btn btn-sm btn-outline-light" href="{{ url_for('project_detail', project_id=project.id) }}">Open</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-    {% endfor %}
-  </div>
+    </div>
+  {% else %}
+    <div class="row g-3">
+      {% for project in projects %}
+        <div class="col-md-6 col-xl-4">
+          <a class="project-card" href="{{ url_for('project_detail', project_id=project.id) }}">
+            <div class="d-flex justify-content-between align-items-start">
+              <span class="domain-pill">{{ project.root_domain }}</span>
+              <span class="project-arrow">&rarr;</span>
+            </div>
+            <h3>{{ project.company_name }}</h3>
+            <div class="project-meta">
+              <span>{{ project.scan_count }} scan{% if project.scan_count != 1 %}s{% endif %}</span>
+              <span>Last: {{ project.last_scan or "Never" }}</span>
+            </div>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
 {% else %}
   <div class="empty-state">
     <h2>No projects yet</h2>

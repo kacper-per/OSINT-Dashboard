@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Compare scans | {{ project.company_name }}{% endblock %}
+{% macro render_rows(rows, state) %}
+  {% if rows %}
+    <div class="diff-block">
+      <h3>{{ state }}</h3>
+      <div class="table-responsive">
+        <table class="table table-darkish mb-0">
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td>
+                  {% for key, value in row.items() if key not in ["id", "project_id", "scan_run_id"] %}
+                    <div><span class="diff-key">{{ key }}</span> <span class="break-all">{{ value }}</span></div>
+                  {% endfor %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+{% endmacro %}
+{% block content %}
+<div class="page-heading d-lg-flex justify-content-between align-items-end">
+  <div>
+    <div class="eyebrow">Scan comparison</div>
+    <h1>{{ project.company_name }}</h1>
+    <p class="font-monospace mb-0">{{ project.root_domain }}</p>
+  </div>
+  <div class="d-flex gap-2 mt-3 mt-lg-0">
+    <a class="btn btn-outline-light" href="{{ url_for('project_detail', project_id=project.id) }}">Project overview</a>
+    <a class="btn btn-outline-light" href="{{ url_for('dashboard', project_id=project.id) }}">Open dashboard</a>
+  </div>
+</div>
+
+{% if not latest_scan or not previous_scan %}
+  <div class="empty-state">
+    <h2>Not enough scan history</h2>
+    <p>Run at least two reconnaissance scans to compare changes.</p>
+  </div>
+{% else %}
+  <div class="panel mb-4">
+    <div class="panel-heading">
+      <h2>Compared scans</h2>
+      <span>#{{ previous_scan.scan_number }} to #{{ latest_scan.scan_number }}</span>
+    </div>
+    <div class="comparison-meta">
+      <div>
+        <span>Previous</span>
+        <strong>#{{ previous_scan.scan_number }}</strong>
+        <p>{{ previous_scan.finished_at or previous_scan.started_at }}</p>
+      </div>
+      <div>
+        <span>Latest</span>
+        <strong>#{{ latest_scan.scan_number }}</strong>
+        <p>{{ latest_scan.finished_at or latest_scan.started_at }}</p>
+      </div>
+    </div>
+  </div>
+
+  {% if source_warnings.previous or source_warnings.latest %}
+    <div class="source-warning-panel mb-4">
+      <div class="panel-heading">
+        <h2>Comparison diagnostics</h2>
+        <span>Source warnings affect interpretation</span>
+      </div>
+      <div class="p-3">
+        {% for warning in source_warnings.previous %}
+          <div class="source-warning">
+            <strong>Previous scan #{{ previous_scan.scan_number }}: {{ warning.source }}</strong>
+            <p>{{ warning.impact }}</p>
+            <pre>{{ warning.raw_output }}</pre>
+          </div>
+        {% endfor %}
+        {% for warning in source_warnings.latest %}
+          <div class="source-warning">
+            <strong>Latest scan #{{ latest_scan.scan_number }}: {{ warning.source }}</strong>
+            <p>{{ warning.impact }}</p>
+            <pre>{{ warning.raw_output }}</pre>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% for section in comparison %}
+    <div class="panel mb-3">
+      <div class="panel-heading flex-wrap gap-2">
+        <h2>{{ section.label }}</h2>
+        <span>
+          {{ section.diff.added|length }} added,
+          {{ section.diff.removed|length }} removed,
+          {{ section.diff.changed|length }} changed
+        </span>
+      </div>
+      {% if section.total %}
+        <div class="p-3">
+          {{ render_rows(section.diff.added, "Added") }}
+          {{ render_rows(section.diff.removed, "Removed") }}
+          {% if section.diff.changed %}
+            <div class="diff-block">
+              <h3>Changed</h3>
+              <div class="table-responsive">
+                <table class="table table-darkish mb-0">
+                  <thead><tr><th>Key</th><th>Before</th><th>After</th></tr></thead>
+                  <tbody>
+                    {% for change in section.diff.changed %}
+                      <tr>
+                        <td class="font-monospace">{{ change.key }}</td>
+                        <td><pre class="raw-output mb-0">{{ change.before|tojson(indent=2) }}</pre></td>
+                        <td><pre class="raw-output mb-0">{{ change.after|tojson(indent=2) }}</pre></td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="empty-inline">No changes in this section.</div>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

@@ -7,11 +7,21 @@
     <h1>{{ project.company_name }}</h1>
     <p class="font-monospace mb-0">{{ project.root_domain }}</p>
   </div>
-  <div class="d-flex gap-2 mt-3 mt-lg-0">
-    <a class="btn btn-outline-light" href="{{ url_for('dashboard', project_id=project.id) }}">Open dashboard</a>
+  <div class="d-flex flex-wrap gap-2 mt-3 mt-lg-0">
+    <a class="btn btn-outline-light {% if not latest_scan %}disabled{% endif %}"
+       href="{{ url_for('dashboard', project_id=project.id) }}">Open dashboard</a>
+    <a class="btn btn-outline-light {% if scan_runs|length < 2 %}disabled{% endif %}"
+       href="{{ url_for('compare_scans', project_id=project.id) }}">Compare latest</a>
     <form method="post" action="{{ url_for('run_scan', project_id=project.id) }}"
-          data-confirm="Run passive recon now? Existing project results will be refreshed.">
-      <button class="btn btn-accent" type="submit">Run reconnaissance</button>
+          data-confirm="Run passive recon now?"
+          data-confirm-title="Run reconnaissance"
+          data-confirm-body="This will start a new passive OSINT scan for {{ project.root_domain }} and store it as a scan history snapshot."
+          data-confirm-button="Start scan"
+          data-busy-label="Running reconnaissance...">
+      <button class="btn btn-accent" type="submit" {% if running_scan %}disabled{% endif %}>
+        <span class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true" data-busy-spinner></span>
+        <span data-busy-text>{{ "Scan running..." if running_scan else "Run reconnaissance" }}</span>
+      </button>
     </form>
   </div>
 </div>
@@ -19,22 +29,96 @@
 {% include "_summary_cards.html" %}
 
 <div class="row g-4 mt-1">
-  <div class="col-lg-7">
-    <div class="panel h-100">
-      <div class="panel-heading">
+  <div class="col-12">
+    <div class="panel">
+      <div class="panel-heading flex-wrap gap-2">
         <h2>Scan history</h2>
-        <span>{{ scan_runs|length }} recent runs</span>
+        <div class="bulk-actions">
+          <span>Keeping last {{ config.SCAN_HISTORY_LIMIT }} scans</span>
+          <form id="scan-bulk-form" method="post" action="{{ url_for('bulk_scan_action', project_id=project.id) }}"
+                data-confirm="Apply selected scan action?"></form>
+          {% if scan_runs %}
+            <button class="btn btn-sm btn-outline-light" type="submit" form="scan-bulk-form"
+                    name="bulk_action" value="report"
+                    data-confirm-title="Generate selected reports"
+                    data-confirm-body="{% if report_count >= config.REPORT_LIMIT %}Report limit reached. Generating reports for selected scans will delete the oldest report file(s) as needed. Continue?{% else %}Generate HTML reports for the selected completed scans?{% endif %}"
+                    data-confirm-button="Generate reports">Report selected</button>
+            <button class="btn btn-sm btn-outline-danger" type="submit" form="scan-bulk-form"
+                    name="bulk_action" value="delete"
+                    data-confirm-title="Delete selected scans"
+                    data-confirm-body="Delete selected scan results? Existing HTML report files will be kept as snapshots."
+                    data-confirm-button="Delete selected">Delete selected</button>
+            <button class="btn btn-sm btn-outline-danger" type="submit" form="scan-bulk-form"
+                    name="bulk_action" value="delete_all"
+                    data-confirm-title="Delete all scans"
+                    data-confirm-body="Delete all stored scan results for this project? Existing HTML report files will be kept as snapshots."
+                    data-confirm-button="Delete all scans">Delete all</button>
+          {% endif %}
+        </div>
       </div>
       {% if scan_runs %}
         <div class="table-responsive">
           <table class="table table-darkish align-middle mb-0">
-            <thead><tr><th>Started</th><th>Finished</th><th>Status</th></tr></thead>
+            <thead>
+              <tr>
+                <th><input class="form-check-input" type="checkbox" data-select-all=".scan-select"></th>
+                <th>Scan</th>
+                <th>Started</th>
+                <th>Finished</th>
+                <th>Status</th>
+                <th>Subdomains</th>
+                <th>DNS</th>
+                <th>HTTP</th>
+                <th>Emails</th>
+                <th>Missing headers</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {% for scan in scan_runs %}
+              {% for item in scan_runs %}
+                {% set scan = item.scan %}
+                {% set scan_summary = item.summary %}
                 <tr>
+                  <td>
+                    {% if scan.status != "running" %}
+                      <input class="form-check-input scan-select" type="checkbox" name="scan_ids"
+                             value="{{ scan.id }}" form="scan-bulk-form">
+                    {% endif %}
+                  </td>
+                  <td>#{{ scan.scan_number }}</td>
                   <td>{{ scan.started_at }}</td>
                   <td>{{ scan.finished_at or "In progress" }}</td>
                   <td><span class="status-badge status-{{ scan.status }}">{{ scan.status|replace("_", " ") }}</span></td>
+                  <td>{{ scan_summary.subdomains }}</td>
+                  <td>{{ scan_summary.dns_records }}</td>
+                  <td>{{ scan_summary.http_results }}</td>
+                  <td>{{ scan_summary.emails }}</td>
+                  <td>{{ scan_summary.missing_headers }}</td>
+                  <td>
+                    <div class="table-actions">
+                      <a class="btn btn-sm btn-outline-light"
+                         href="{{ url_for('dashboard', project_id=project.id, scan_id=scan.id) }}">Open</a>
+                      {% if scan.status != "running" %}
+                        <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}"
+                              data-confirm="Generate an HTML report for scan #{{ scan.scan_number }}?"
+                              data-confirm-title="Generate report"
+                              data-confirm-body="{% if report_count >= config.REPORT_LIMIT %}Report limit reached. Generating this report will delete the oldest report file. Continue?{% else %}This will create a new HTML report snapshot for scan #{{ scan.scan_number }}. Reports are kept separately from scan history.{% endif %}"
+                              data-confirm-button="Generate report">
+                          <input type="hidden" name="scan_id" value="{{ scan.id }}">
+                          <input type="hidden" name="report_intent" value="generate_report">
+                          <button class="btn btn-sm btn-outline-light" type="submit">Report</button>
+                        </form>
+                        <form method="post"
+                              action="{{ url_for('delete_scan', project_id=project.id, scan_id=scan.id) }}"
+                              data-confirm="Delete scan #{{ scan.scan_number }}?"
+                              data-confirm-title="Delete scan"
+                              data-confirm-body="Delete scan #{{ scan.scan_number }} and its collected database results? Existing HTML report files will be kept as snapshots."
+                              data-confirm-button="Delete scan">
+                          <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -45,25 +129,92 @@
       {% endif %}
     </div>
   </div>
-  <div class="col-lg-5">
-    <div class="panel h-100">
-      <div class="panel-heading">
+
+  <div class="col-12">
+    <div class="panel">
+      <div class="panel-heading flex-wrap gap-2">
         <h2>Reports</h2>
-        <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}">
-          <button class="btn btn-sm btn-outline-light" type="submit">Generate HTML</button>
-        </form>
+        <span>Keeping last {{ config.REPORT_LIMIT }} HTML reports</span>
       </div>
       {% if reports %}
-        <div class="list-group list-group-flush">
-          {% for report in reports %}
-            <a class="report-link" href="{{ url_for('view_report', filename=report) }}" target="_blank">
-              <span>{{ report }}</span><span>&nearr;</span>
-            </a>
-          {% endfor %}
+        <div class="table-responsive">
+          <table class="table table-darkish align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Report</th>
+                <th>Name</th>
+                <th>Created</th>
+                <th>Scan</th>
+                <th>File</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for report in reports %}
+                <tr>
+                  <td>#{{ report.report_number }}</td>
+                  <td>
+                    <form class="inline-report-form" method="post"
+                          action="{{ url_for('rename_report', project_id=project.id, report_id=report.id) }}">
+                      <input class="form-control form-control-sm" name="display_name"
+                             value="{{ report.display_name }}" aria-label="Report name">
+                      <button class="btn btn-sm btn-outline-light" type="submit">Save</button>
+                    </form>
+                  </td>
+                  <td>{{ report.created_at }}</td>
+                  <td>
+                    {% if report.scan_run_id %}
+                      #{{ report.scan_number }} {{ report.scan_status|replace("_", " ") }}
+                    {% else %}
+                      Snapshot only
+                    {% endif %}
+                  </td>
+                  <td class="font-monospace break-all">{{ report.filename }}</td>
+                  <td>
+                    <div class="table-actions">
+                      <a class="btn btn-sm btn-outline-light"
+                         href="{{ url_for('view_report', filename=report.filename) }}"
+                         target="_blank">Open</a>
+                      <form method="post"
+                            action="{{ url_for('delete_report', project_id=project.id, report_id=report.id) }}"
+                            data-confirm="Delete this HTML report?"
+                            data-confirm-title="Delete report"
+                            data-confirm-body="This removes the saved HTML report file and its report entry. Scan history is not deleted."
+                            data-confirm-button="Delete report">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
       {% else %}
-        <div class="empty-inline">Generate a portable report after the first scan.</div>
+        <div class="empty-inline">Generate a portable report from a completed scan.</div>
       {% endif %}
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="panel danger-panel">
+      <div class="panel-heading flex-wrap gap-2">
+        <h2>Project management</h2>
+        <span>Permanent local deletion</span>
+      </div>
+      <div class="p-3 project-management">
+        <div>
+          <strong>Delete this project</strong>
+          <p>Remove the project, scan history, normalized findings, raw results, report records, and saved HTML report files. The root domain can be used again afterward.</p>
+        </div>
+        <form method="post" action="{{ url_for('delete_project', project_id=project.id) }}"
+              data-confirm="Delete this project and all local data?"
+              data-confirm-title="Delete project"
+              data-confirm-body="This permanently deletes {{ project.root_domain }} from the local database and removes its saved HTML report files. This cannot be undone."
+              data-confirm-button="Delete project">
+          <button class="btn btn-outline-danger" type="submit">Delete project</button>
+        </form>
+      </div>
     </div>
   </div>
 </div>

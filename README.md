@@ -3,7 +3,8 @@
 A beginner-friendly local Flask application for the first, passive phase of an
 authorized security assessment. Create a project for an organization and root
 domain, run public-source reconnaissance, review normalized findings in a
-dashboard, and export a standalone HTML report.
+dashboard, compare recent scan history, and export standalone HTML report
+snapshots.
 
 The working MVP uses only free public sources and free Python libraries. It
 does not require API keys or paid services.
@@ -18,8 +19,9 @@ does not require API keys or paid services.
 - Publicly presented TLS certificate details and SAN names
 - Email addresses displayed on the root-domain homepage
 
-Results are deduplicated and stored locally in SQLite. A failed module does not
-stop the rest of a scan; warnings are saved under **Raw Results**.
+Results are deduplicated per scan and stored locally in SQLite. A failed module
+does not stop the rest of a scan; warnings are saved under **Raw Results** and
+the scan is marked `completed_with_errors`.
 
 ## Ethical and Legal Note
 
@@ -58,7 +60,15 @@ On Windows PowerShell, activate the environment with:
    as `example.com`.
 3. Open the project and select **Run reconnaissance**.
 4. Review normalized results in the dashboard.
-5. Select **Generate report** to create `reports/project-<id>-report.html`.
+5. Run additional scans to build the last-five-scan history and compare the
+   latest scan with the previous one.
+6. Select **Generate report** to create a timestamped HTML snapshot for a
+   specific scan.
+
+Scans and reports are numbered per project. The database still keeps internal
+global IDs, but the UI and reports show project-local numbers starting at `#1`.
+Those counters keep increasing even when old scan results or HTML reports are
+pruned by the configured limits.
 
 The database is initialized automatically at `data/osint.db`. To initialize it
 without starting the development server:
@@ -79,6 +89,13 @@ These optional environment variables control local behavior:
 | `REQUEST_TIMEOUT` | `8` | Network timeout in seconds |
 | `TLS_TIMEOUT` | `6` | TLS connection timeout in seconds |
 | `MAX_SUBDOMAINS_TO_PROBE` | `50` | Limits basic HTTP/TLS checks per scan |
+| `CRTSH_TIMEOUT` | `30` | Timeout for crt.sh subdomain discovery |
+| `SCAN_HISTORY_LIMIT` | `5` | Number of scan result snapshots kept per project |
+| `REPORT_LIMIT` | `10` | Number of HTML report files kept per project |
+| `CRTSH_RETRIES` | `2` | Retries for temporary crt.sh failures |
+| `CRTSH_BACKOFF_FACTOR` | `2` | Multiplier for each crt.sh retry timeout |
+| `CRTSH_MAX_TIMEOUT` | `120` | Maximum timeout for a single crt.sh attempt |
+| `CRTSH_RETRY_DELAY` | `1` | Delay between crt.sh retries, in seconds |
 | `USER_AGENT` | application identifier | HTTP User-Agent string |
 
 The subdomain probe limit is intentional: it keeps checks basic and
@@ -116,10 +133,13 @@ pytest
 
 ## Design and Limitations
 
-- Scans run synchronously in the Flask development process. Keep the browser
-  tab open until the scan completes.
-- Existing normalized findings are refreshed at the start of each scan; scan
-  run history remains available.
+- Scans run synchronously in the Flask development process. The scan button is
+  disabled after submit, but keep the browser tab open until the scan completes.
+- The application keeps the latest scan result snapshots per project according
+  to `SCAN_HISTORY_LIMIT`; older scan results are pruned.
+- HTML reports are independent snapshots and are kept according to
+  `REPORT_LIMIT`; report records may outlive the scan data they were generated
+  from.
 - The email finder inspects only the homepage and does not crawl the site.
 - HTTP probing checks only HTTP and HTTPS. It is not a port scanner.
 - WHOIS availability and format vary by registry.
@@ -127,6 +147,6 @@ pytest
 - Bootstrap and Chart.js are loaded from public CDNs. The application and its
   evidence tables still function if Chart.js is unavailable.
 
-Future improvements could add background jobs, scan snapshots, local vendored
-UI assets, authenticated user accounts, or optional integrations. Paid APIs are
+Future improvements could add background jobs, local vendored UI assets,
+authenticated user accounts, or optional integrations. Paid APIs are
 deliberately outside this MVP.

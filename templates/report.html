@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>OSINT Recon Report - {{ project.company_name }}</title>
+  <title>{{ report_name or "OSINT Recon Report" }} - {{ project.company_name }}</title>
   <style>
     body { font: 14px/1.5 Arial, sans-serif; color: #17212b; max-width: 1100px; margin: 40px auto; padding: 0 24px; }
     h1, h2 { color: #102a43; } h2 { margin-top: 32px; border-bottom: 2px solid #d9e2ec; padding-bottom: 6px; }
@@ -15,12 +15,13 @@
   </style>
 </head>
 <body>
-  <h1>OSINT Reconnaissance Report</h1>
+  <h1>{{ report_name or "OSINT Reconnaissance Report" }}</h1>
   <div class="meta">
     <strong>Organization:</strong> {{ project.company_name }}<br>
     <strong>Root domain:</strong> {{ project.root_domain }}<br>
     <strong>Project created:</strong> {{ project.created_at }}<br>
-    <strong>Latest scan:</strong> {{ latest_scan.finished_at if latest_scan else "No completed scan" }}
+    <strong>Scan:</strong> #{{ latest_scan.scan_number if latest_scan else "-" }}<br>
+    <strong>Scan finished:</strong> {{ latest_scan.finished_at if latest_scan else "No completed scan" }}
   </div>
 
   <h2>Scope and Sources</h2>

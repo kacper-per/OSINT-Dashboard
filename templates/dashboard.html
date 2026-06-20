@@ -6,17 +6,70 @@
   <div>
     <div class="eyebrow">Recon dashboard</div>
     <h1>{{ project.company_name }}</h1>
-    <p class="font-monospace mb-0">{{ project.root_domain }}</p>
+    <p class="font-monospace mb-1">{{ project.root_domain }}</p>
+    <p class="mb-0">
+      {% if selected_scan %}
+        Viewing scan #{{ selected_scan.scan_number }} from {{ selected_scan.started_at }}
+        <span class="status-badge status-{{ selected_scan.status }}">{{ selected_scan.status|replace("_", " ") }}</span>
+      {% else %}
+        No completed scan selected.
+      {% endif %}
+    </p>
   </div>
-  <div class="d-flex gap-2 mt-3 mt-lg-0">
+  <div class="d-flex flex-wrap gap-2 mt-3 mt-lg-0">
     <a class="btn btn-outline-light" href="{{ url_for('project_detail', project_id=project.id) }}">Project overview</a>
-    <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}">
-      <button class="btn btn-accent" type="submit">Generate report</button>
-    </form>
+    <a class="btn btn-outline-light {% if scan_runs|length < 2 %}disabled{% endif %}"
+       href="{{ url_for('compare_scans', project_id=project.id) }}">Compare latest</a>
+    {% if selected_scan and selected_scan.status != "running" %}
+      <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}"
+            data-confirm="Generate an HTML report for scan #{{ selected_scan.scan_number }}?"
+            data-confirm-title="Generate report"
+            data-confirm-body="{% if report_count >= config.REPORT_LIMIT %}Report limit reached. Generating this report will delete the oldest report file. Continue?{% else %}This will create a new HTML report snapshot for scan #{{ selected_scan.scan_number }}. Reports are kept separately from scan history.{% endif %}"
+            data-confirm-button="Generate report">
+        <input type="hidden" name="scan_id" value="{{ selected_scan.id }}">
+        <input type="hidden" name="report_intent" value="generate_report">
+        <button class="btn btn-accent" type="submit">Generate report</button>
+      </form>
+    {% endif %}
   </div>
 </div>
 
 {% include "_summary_cards.html" %}
+
+{% if source_warnings %}
+  <div class="source-warning-panel mb-4">
+    <div class="panel-heading">
+      <h2>Source diagnostics</h2>
+      <span>{{ source_warnings|length }} warning{% if source_warnings|length != 1 %}s{% endif %}</span>
+    </div>
+    <div class="p-3">
+      {% for warning in source_warnings %}
+        <div class="source-warning">
+          <strong>{{ warning.source }}</strong>
+          <p>{{ warning.impact }}</p>
+          <pre>{{ warning.raw_output }}</pre>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
+{% if scan_runs %}
+  <div class="panel mb-4">
+    <div class="panel-heading">
+      <h2>Available scans</h2>
+      <span>{{ scan_runs|length }} stored</span>
+    </div>
+    <div class="scan-switcher">
+      {% for scan in scan_runs %}
+        <a class="scan-chip {% if selected_scan and scan.id == selected_scan.id %}active{% endif %}"
+           href="{{ url_for('dashboard', project_id=project.id, scan_id=scan.id) }}">
+          #{{ scan.scan_number }} {{ scan.status|replace("_", " ") }}
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
 
 <div class="row g-3 my-4">
   <div class="col-lg-4"><div class="chart-panel"><h2>DNS record types</h2><canvas id="dnsChart"></canvas></div></div>
