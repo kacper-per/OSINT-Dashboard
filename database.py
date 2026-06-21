@@ -20,6 +20,13 @@ RESULT_TABLES = (
     "raw_results",
 )
 
+ACTIVE_SCAN_STATUSES = ("running", "paused", "stopping")
+
+
+def is_active_scan_status(status):
+    return status in ACTIVE_SCAN_STATUSES
+
+
 RESULT_TABLE_COLUMNS = {
     "dns_records": (
         "id",
@@ -206,6 +213,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT,
     status TEXT NOT NULL,
+    control_action TEXT NOT NULL DEFAULT 'run',
     UNIQUE(project_id, scan_number),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -272,12 +280,14 @@ def init_db():
 
 def migrate_db(db):
     migrate_project_counters(db)
+    migrate_scan_controls(db)
     migrate_scan_run_numbers(db)
     migrate_report_numbers(db)
     for table in RESULT_TABLES:
         columns = table_columns(db, table)
         if "scan_run_id" not in columns:
             rebuild_result_table(db, table)
+    reset_interrupted_scan_runs(db)
     refresh_project_counters(db)
 
 
@@ -291,6 +301,12 @@ def migrate_project_counters(db):
         db.execute("ALTER TABLE projects ADD COLUMN next_scan_number INTEGER DEFAULT 1")
     if "next_report_number" not in columns:
         db.execute("ALTER TABLE projects ADD COLUMN next_report_number INTEGER DEFAULT 1")
+
+
+def migrate_scan_controls(db):
+    columns = table_columns(db, "scan_runs")
+    if "control_action" not in columns:
+        db.execute("ALTER TABLE scan_runs ADD COLUMN control_action TEXT NOT NULL DEFAULT 'run'")
 
 
 def migrate_scan_run_numbers(db):
@@ -436,6 +452,20 @@ def refresh_project_counters(db):
         )
 
 
+def reset_interrupted_scan_runs(db):
+    placeholders = ", ".join("?" for _ in ACTIVE_SCAN_STATUSES)
+    db.execute(
+        f"""
+        UPDATE scan_runs
+        SET status = 'failed',
+            finished_at = COALESCE(finished_at, ?),
+            control_action = 'run'
+        WHERE status IN ({placeholders})
+        """,
+        (utc_now(), *ACTIVE_SCAN_STATUSES),
+    )
+
+
 def rebuild_result_table(db, table):
     legacy_table = f"{table}_legacy_migration"
     db.execute(f"ALTER TABLE {table} RENAME TO {legacy_table}")
@@ -512,14 +542,15 @@ def get_project(project_id):
 
 
 def get_running_scan(project_id):
+    placeholders = ", ".join("?" for _ in ACTIVE_SCAN_STATUSES)
     return get_db().execute(
-        """
+        f"""
         SELECT * FROM scan_runs
-        WHERE project_id = ? AND status = ?
+        WHERE project_id = ? AND status IN ({placeholders})
         ORDER BY scan_number DESC
         LIMIT 1
         """,
-        (project_id, "running"),
+        (project_id, *ACTIVE_SCAN_STATUSES),
     ).fetchone()
 
 
@@ -546,31 +577,96 @@ def create_scan_run(project_id):
         return cursor.lastrowid
 
 
-def get_latest_scan_run(project_id):
+def get_scan_control(scan_id):
     return get_db().execute(
-        """
+        "SELECT id, project_id, status, control_action FROM scan_runs WHERE id = ?",
+        (scan_id,),
+    ).fetchone()
+
+
+def set_scan_run_status(scan_id, status):
+    with transaction() as db:
+        db.execute(
+            "UPDATE scan_runs SET status = ? WHERE id = ?",
+            (status, scan_id),
+        )
+
+
+def finish_scan_run(scan_id, status):
+    with transaction() as db:
+        db.execute(
+            """
+            UPDATE scan_runs
+            SET finished_at = ?, status = ?, control_action = 'run'
+            WHERE id = ?
+            """,
+            (utc_now(), status, scan_id),
+        )
+
+
+def request_scan_control(project_id, scan_id, action):
+    if action not in {"pause", "resume", "stop"}:
+        raise ValueError(f"Unsupported scan control action: {action}")
+
+    with transaction() as db:
+        scan = db.execute(
+            "SELECT * FROM scan_runs WHERE project_id = ? AND id = ?",
+            (project_id, scan_id),
+        ).fetchone()
+        if scan is None:
+            return None
+        if not is_active_scan_status(scan["status"]):
+            return scan
+
+        if action == "pause" and scan["status"] == "running":
+            db.execute(
+                "UPDATE scan_runs SET status = 'paused', control_action = 'pause' WHERE id = ?",
+                (scan_id,),
+            )
+        elif action == "resume" and scan["status"] == "paused":
+            db.execute(
+                "UPDATE scan_runs SET status = 'running', control_action = 'run' WHERE id = ?",
+                (scan_id,),
+            )
+        elif action == "stop":
+            db.execute(
+                "UPDATE scan_runs SET status = 'stopping', control_action = 'stop' WHERE id = ?",
+                (scan_id,),
+            )
+
+        return db.execute(
+            "SELECT * FROM scan_runs WHERE project_id = ? AND id = ?",
+            (project_id, scan_id),
+        ).fetchone()
+
+
+def get_latest_scan_run(project_id):
+    placeholders = ", ".join("?" for _ in ACTIVE_SCAN_STATUSES)
+    return get_db().execute(
+        f"""
         SELECT * FROM scan_runs
-        WHERE project_id = ? AND status != 'running'
+        WHERE project_id = ? AND status NOT IN ({placeholders})
         ORDER BY scan_number DESC
         LIMIT 1
         """,
-        (project_id,),
+        (project_id, *ACTIVE_SCAN_STATUSES),
     ).fetchone()
 
 
 def get_previous_scan_run(project_id, scan_id):
+    placeholders = ", ".join("?" for _ in ACTIVE_SCAN_STATUSES)
     return get_db().execute(
-        """
+        f"""
         SELECT * FROM scan_runs
         WHERE project_id = ?
           AND scan_number < (
               SELECT scan_number FROM scan_runs WHERE project_id = ? AND id = ?
           )
-          AND status != 'running'
+          AND status NOT IN ({placeholders})
         ORDER BY scan_number DESC
         LIMIT 1
         """,
-        (project_id, project_id, scan_id),
+        (project_id, project_id, scan_id, *ACTIVE_SCAN_STATUSES),
     ).fetchone()
 
 
@@ -670,11 +766,13 @@ def fetch_project_data(project_id, scan_run_id=None):
 
 
 def prune_old_scan_runs(project_id, keep=5):
+    placeholders = ", ".join("?" for _ in ACTIVE_SCAN_STATUSES)
     with transaction() as db:
         db.execute(
-            """
+            f"""
             DELETE FROM scan_runs
             WHERE project_id = ?
+              AND status NOT IN ({placeholders})
               AND id NOT IN (
                   SELECT id FROM scan_runs
                   WHERE project_id = ?
@@ -682,7 +780,7 @@ def prune_old_scan_runs(project_id, keep=5):
                   LIMIT ?
               )
             """,
-            (project_id, project_id, keep),
+            (project_id, *ACTIVE_SCAN_STATUSES, project_id, keep),
         )
 
 
@@ -692,7 +790,7 @@ def delete_scan(project_id, scan_id):
             "SELECT * FROM scan_runs WHERE project_id = ? AND id = ?",
             (project_id, scan_id),
         ).fetchone()
-        if scan is not None and scan["status"] != "running":
+        if scan is not None and not is_active_scan_status(scan["status"]):
             db.execute("DELETE FROM scan_runs WHERE id = ?", (scan["id"],))
         return scan
 
@@ -702,13 +800,16 @@ def delete_scans(project_id, scan_ids):
         if not scan_ids:
             return []
         placeholders = ", ".join("?" for _ in scan_ids)
+        active_placeholders = ", ".join("?" for _ in ACTIVE_SCAN_STATUSES)
         scans = db.execute(
             f"""
             SELECT * FROM scan_runs
-            WHERE project_id = ? AND id IN ({placeholders}) AND status != 'running'
+            WHERE project_id = ?
+              AND id IN ({placeholders})
+              AND status NOT IN ({active_placeholders})
             ORDER BY scan_number
             """,
-            (project_id, *scan_ids),
+            (project_id, *scan_ids, *ACTIVE_SCAN_STATUSES),
         ).fetchall()
         if scans:
             delete_placeholders = ", ".join("?" for _ in scans)
@@ -720,18 +821,22 @@ def delete_scans(project_id, scan_ids):
 
 
 def delete_all_scans(project_id):
+    active_placeholders = ", ".join("?" for _ in ACTIVE_SCAN_STATUSES)
     with transaction() as db:
         scans = db.execute(
-            """
+            f"""
             SELECT * FROM scan_runs
-            WHERE project_id = ? AND status != 'running'
+            WHERE project_id = ? AND status NOT IN ({active_placeholders})
             ORDER BY scan_number
             """,
-            (project_id,),
+            (project_id, *ACTIVE_SCAN_STATUSES),
         ).fetchall()
         db.execute(
-            "DELETE FROM scan_runs WHERE project_id = ? AND status != 'running'",
-            (project_id,),
+            f"""
+            DELETE FROM scan_runs
+            WHERE project_id = ? AND status NOT IN ({active_placeholders})
+            """,
+            (project_id, *ACTIVE_SCAN_STATUSES),
         )
         return scans
 

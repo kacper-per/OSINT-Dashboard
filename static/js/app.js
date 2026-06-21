@@ -132,7 +132,12 @@ if (chartDataElement && window.Chart) {
       data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: "#101d2e" }] },
       options: {
         maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#cbd8e6", boxWidth: 10 } } },
+        plugins: {
+          legend: {
+            display: type !== "bar",
+            labels: { color: "#cbd8e6", boxWidth: 10 }
+          }
+        },
         scales: type === "bar" ? {
           x: { ticks: { color: "#8fa4ba" }, grid: { color: "#23364e" } },
           y: { ticks: { color: "#8fa4ba", precision: 0 }, grid: { color: "#23364e" } }

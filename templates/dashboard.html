@@ -20,7 +20,7 @@
     <a class="btn btn-outline-light" href="{{ url_for('project_detail', project_id=project.id) }}">Project overview</a>
     <a class="btn btn-outline-light {% if scan_runs|length < 2 %}disabled{% endif %}"
        href="{{ url_for('compare_scans', project_id=project.id) }}">Compare latest</a>
-    {% if selected_scan and selected_scan.status != "running" %}
+    {% if selected_scan and selected_scan.status not in active_scan_statuses %}
       <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}"
             data-confirm="Generate an HTML report for scan #{{ selected_scan.scan_number }}?"
             data-confirm-title="Generate report"
@@ -34,7 +34,26 @@
   </div>
 </div>
 
-{% include "_summary_cards.html" %}
+{% if scan_runs %}
+  <div class="panel mb-4">
+    <div class="panel-heading">
+      <h2>Available scans</h2>
+      <span>{{ scan_runs|length }} stored</span>
+    </div>
+    <div class="scan-switcher">
+      {% for scan in scan_runs %}
+        <a class="scan-chip {% if selected_scan and scan.id == selected_scan.id %}active{% endif %}"
+           href="{{ url_for('dashboard', project_id=project.id, scan_id=scan.id) }}">
+          #{{ scan.scan_number }} {{ scan.status|replace("_", " ") }}
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
+<div class="dashboard-summary-block">
+  {% include "_summary_cards.html" %}
+</div>
 
 {% if source_warnings %}
   <div class="source-warning-panel mb-4">
@@ -49,23 +68,6 @@
           <p>{{ warning.impact }}</p>
           <pre>{{ warning.raw_output }}</pre>
         </div>
-      {% endfor %}
-    </div>
-  </div>
-{% endif %}
-
-{% if scan_runs %}
-  <div class="panel mb-4">
-    <div class="panel-heading">
-      <h2>Available scans</h2>
-      <span>{{ scan_runs|length }} stored</span>
-    </div>
-    <div class="scan-switcher">
-      {% for scan in scan_runs %}
-        <a class="scan-chip {% if selected_scan and scan.id == selected_scan.id %}active{% endif %}"
-           href="{{ url_for('dashboard', project_id=project.id, scan_id=scan.id) }}">
-          #{{ scan.scan_number }} {{ scan.status|replace("_", " ") }}
-        </a>
       {% endfor %}
     </div>
   </div>
@@ -149,7 +151,7 @@
           <strong>Deep email search</strong>
           <span>Crawls in-scope HTML pages for this scan, up to {{ config.EMAIL_CRAWL_MAX_PAGES }} pages.</span>
         </div>
-        {% if selected_scan and selected_scan.status != "running" %}
+        {% if selected_scan and selected_scan.status not in active_scan_statuses %}
           <form method="post"
                 action="{{ url_for('deep_search_emails', project_id=project.id, scan_id=selected_scan.id) }}"
                 data-confirm="Run deep email search for {{ project.root_domain }}?"

@@ -2,6 +2,8 @@ import json
 import os
 import re
 import sqlite3
+import threading
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +40,10 @@ REPORT_FILENAME_PATTERN = re.compile(r"project-\d+-scan-\d+-\d{8}-\d{6}(?:-\d+)?
 LEGACY_REPORT_FILENAME_PATTERN = re.compile(r"project-(\d+)-report\.html")
 
 
+class ScanStopped(Exception):
+    pass
+
+
 def normalize_domain(value):
     domain = value.strip().lower().rstrip(".")
     if "://" in domain or "/" in domain or not DOMAIN_PATTERN.fullmatch(domain):
@@ -53,6 +59,7 @@ def create_app(test_config=None):
 
     Path(app.config["REPORTS_DIR"]).mkdir(parents=True, exist_ok=True)
     database.init_app(app)
+    app.jinja_env.globals["active_scan_statuses"] = database.ACTIVE_SCAN_STATUSES
     migrate_legacy_report_files(app)
 
     @app.route("/")
@@ -62,14 +69,29 @@ def create_app(test_config=None):
             view_mode = "cards"
         projects = database.get_db().execute(
             """
-            SELECT p.*, COUNT(sr.id) AS scan_count, MAX(sr.finished_at) AS last_scan
+            SELECT p.*,
+                   COUNT(DISTINCT sr.id) AS scan_count,
+                   COUNT(DISTINCT reports.id) AS report_count,
+                   MAX(sr.finished_at) AS last_scan,
+                   SUM(CASE WHEN sr.status IN ('running', 'paused', 'stopping') THEN 1 ELSE 0 END) AS running_scan_count
             FROM projects p
             LEFT JOIN scan_runs sr ON sr.project_id = p.id
+            LEFT JOIN reports ON reports.project_id = p.id
             GROUP BY p.id
             ORDER BY p.id DESC
             """
         ).fetchall()
         return render_template("index.html", projects=projects, view_mode=view_mode)
+
+    @app.template_filter("display_datetime")
+    def display_datetime(value):
+        if not value:
+            return "Never"
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError:
+            return str(value).replace("T", " ")
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
     @app.route("/projects/new", methods=("GET", "POST"))
     def new_project():
@@ -162,7 +184,7 @@ def create_app(test_config=None):
     def deep_search_emails(project_id, scan_id):
         project = get_project_or_404(project_id)
         scan = get_scan_or_404(project_id, scan_id)
-        if scan["status"] == "running":
+        if database.is_active_scan_status(scan["status"]):
             flash("Wait for the scan to finish before running deep email search.", "warning")
             return redirect(url_for("dashboard", project_id=project_id, scan_id=scan_id) + "#tab-7")
 
@@ -235,29 +257,113 @@ def create_app(test_config=None):
         project = get_project_or_404(project_id)
         if database.get_running_scan(project_id):
             flash("A reconnaissance run is already in progress for this project.", "warning")
-            return redirect(url_for("project_detail", project_id=project_id))
+            return redirect_after_scan_start(project_id)
 
         scan_id = database.create_scan_run(project_id)
+
+        if app.config.get("RUN_SCANS_INLINE") or app.config.get("TESTING"):
+            status, failures = run_scan_to_completion(project_id, scan_id)
+            flash_scan_result(status, failures)
+            if request.form.get("return_to") == "index":
+                return redirect_after_scan_start(project_id)
+            return redirect(url_for("dashboard", project_id=project_id, scan_id=scan_id))
+
+        thread = threading.Thread(
+            target=run_scan_worker,
+            args=(project_id, scan_id),
+            daemon=True,
+        )
+        thread.start()
+
+        flash(
+            "Reconnaissance started. You can pause or stop it from this project page.",
+            "success",
+        )
+        return redirect_after_scan_start(project_id)
+
+    def redirect_after_scan_start(project_id):
+        if request.form.get("return_to") == "index":
+            view_mode = request.form.get("view", "cards")
+            if view_mode not in {"cards", "list"}:
+                view_mode = "cards"
+            return redirect(url_for("index", view=view_mode))
+        return redirect(url_for("project_detail", project_id=project_id))
+
+    @app.post("/projects/<int:project_id>/scans/<int:scan_id>/control")
+    def control_scan(project_id, scan_id):
+        get_project_or_404(project_id)
+        action = request.form.get("action", "")
+        if action not in {"pause", "resume", "stop"}:
+            abort(400)
+
+        scan = database.request_scan_control(project_id, scan_id, action)
+        if scan is None:
+            abort(404)
+
+        if not database.is_active_scan_status(scan["status"]):
+            flash("This scan has already finished.", "warning")
+        elif action == "pause":
+            flash("Pause requested. The scan will pause after the current network step.", "warning")
+        elif action == "resume":
+            flash("Scan resumed.", "success")
+        elif action == "stop":
+            flash("Stop requested. The scan will stop after the current network step.", "warning")
+
+        return redirect(url_for("project_detail", project_id=project_id))
+
+    def run_scan_worker(project_id, scan_id):
+        with app.app_context():
+            run_scan_to_completion(project_id, scan_id)
+
+    def run_scan_to_completion(project_id, scan_id):
+        project = database.get_project(project_id)
+        if project is None:
+            database.finish_scan_run(scan_id, "failed")
+            return "failed", 1
 
         failures = 0
         status = "completed"
         try:
-            failures = perform_scan(project, scan_id)
+            failures = perform_scan(
+                project,
+                scan_id,
+                lambda: wait_for_scan_control(scan_id),
+            )
             status = "completed_with_errors" if failures else "completed"
+        except ScanStopped:
+            status = "stopped"
+            record_raw(project_id, scan_id, "scan_control", "Scan stopped by user.")
         except Exception as exc:
             failures = 1
             status = "failed"
             record_raw(project_id, scan_id, "scan_error", exc)
         finally:
-            with database.transaction() as db:
-                db.execute(
-                    "UPDATE scan_runs SET finished_at = ?, status = ? WHERE id = ?",
-                    (database.utc_now(), status, scan_id),
-                )
+            database.finish_scan_run(scan_id, status)
             database.prune_old_scan_runs(project_id, app.config["SCAN_HISTORY_LIMIT"])
 
+        return status, failures
+
+    def wait_for_scan_control(scan_id):
+        while True:
+            scan = database.get_scan_control(scan_id)
+            if scan is None:
+                raise ScanStopped()
+            if scan["control_action"] == "stop" or scan["status"] == "stopping":
+                raise ScanStopped()
+            if scan["control_action"] == "pause" or scan["status"] == "paused":
+                if scan["status"] != "paused":
+                    database.set_scan_run_status(scan_id, "paused")
+                time.sleep(app.config["SCAN_CONTROL_POLL_INTERVAL"])
+                continue
+            if scan["status"] != "running":
+                raise ScanStopped()
+            return
+
+    def flash_scan_result(status, failures):
         if status == "failed":
             flash("Recon failed unexpectedly. Details are in Raw Results.", "danger")
+        elif status == "stopped":
+            flash("Recon stopped. Partial results were kept for review.", "warning")
         elif failures:
             flash(
                 f"Recon completed with {failures} module warning(s). Details are in Raw Results.",
@@ -265,7 +371,6 @@ def create_app(test_config=None):
             )
         else:
             flash("Passive recon completed successfully.", "success")
-        return redirect(url_for("dashboard", project_id=project_id, scan_id=scan_id))
 
     @app.post("/projects/<int:project_id>/reports")
     def generate_report(project_id):
@@ -276,7 +381,7 @@ def create_app(test_config=None):
 
         scan_id = request.form.get("scan_id", type=int)
         scan = get_scan_or_404(project_id, scan_id) if scan_id else database.get_latest_scan_run(project_id)
-        if not scan or scan["status"] == "running":
+        if not scan or database.is_active_scan_status(scan["status"]):
             flash("Generate a report after a scan has finished.", "warning")
             return redirect(url_for("project_detail", project_id=project_id))
 
@@ -310,7 +415,7 @@ def create_app(test_config=None):
         if action == "report":
             scans = [
                 scan for scan in database.get_scan_runs(project_id, scan_ids)
-                if scan["status"] != "running"
+                if not database.is_active_scan_status(scan["status"])
             ]
             for scan in scans:
                 create_report_snapshot(project, scan, "")
@@ -327,8 +432,8 @@ def create_app(test_config=None):
         scan = database.delete_scan(project_id, scan_id)
         if scan is None:
             abort(404)
-        if scan["status"] == "running":
-            flash("Running scans cannot be deleted.", "warning")
+        if database.is_active_scan_status(scan["status"]):
+            flash("Active scans cannot be deleted. Stop the scan first.", "warning")
         else:
             flash(f"Deleted scan #{scan['scan_number']}. Existing HTML reports were kept.", "success")
         return redirect(url_for("project_detail", project_id=project_id))
@@ -357,7 +462,7 @@ def create_app(test_config=None):
     def delete_project(project_id):
         project = get_project_or_404(project_id)
         if database.get_running_scan(project_id):
-            flash("Stop or wait for the running scan before deleting this project.", "warning")
+            flash("Stop or wait for the active scan before deleting this project.", "warning")
             return redirect(url_for("project_detail", project_id=project_id))
 
         reports = database.list_reports(project_id)
@@ -397,13 +502,14 @@ def create_app(test_config=None):
             [(scan_run_id, project_id, module_name, str(output), database.utc_now())],
         )
 
-    def perform_scan(project, scan_id):
+    def perform_scan(project, scan_id, check_scan_control=lambda: None):
         project_id = project["id"]
         domain = project["root_domain"]
         timeout = app.config["REQUEST_TIMEOUT"]
         user_agent = app.config["USER_AGENT"]
         failures = 0
 
+        check_scan_control()
         try:
             records, errors = dns_lookup.lookup_dns(domain, timeout)
             database.insert_rows(
@@ -437,6 +543,7 @@ def create_app(test_config=None):
             record_raw(project_id, scan_id, "dns_lookup_error", exc)
 
         subdomains = []
+        check_scan_control()
         try:
             subdomains = crtsh_lookup.discover_subdomains(
                 domain,
@@ -462,6 +569,7 @@ def create_app(test_config=None):
         hosts = [domain] + subdomains[: app.config["MAX_SUBDOMAINS_TO_PROBE"]]
         https_hosts = set()
         for host in hosts:
+            check_scan_control()
             try:
                 results, errors = http_probe.probe_host(host, timeout, user_agent)
                 database.insert_rows(
@@ -526,6 +634,7 @@ def create_app(test_config=None):
                 failures += 1
                 record_raw(project_id, scan_id, f"http_probe_error:{host}", exc)
 
+        check_scan_control()
         try:
             raw_whois = whois_lookup.lookup_whois(domain)
             database.insert_rows(
@@ -538,6 +647,7 @@ def create_app(test_config=None):
             record_raw(project_id, scan_id, "whois_lookup_error", exc)
 
         for host in sorted(https_hosts):
+            check_scan_control()
             try:
                 certificate = tls_info.fetch_tls_certificate(host, app.config["TLS_TIMEOUT"])
                 database.insert_rows(
@@ -571,6 +681,7 @@ def create_app(test_config=None):
                 failures += 1
                 record_raw(project_id, scan_id, f"tls_info_error:{host}", exc)
 
+        check_scan_control()
         try:
             emails, source_url, errors = email_finder.find_homepage_emails(
                 domain, timeout, user_agent

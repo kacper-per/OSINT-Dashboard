@@ -1,5 +1,17 @@
 {% extends "base.html" %}
 {% block title %}{{ project.company_name }} | OSINT Recon Dashboard{% endblock %}
+{% macro scan_control_button(project_id, scan, action, label, button_class) %}
+  <form method="post" action="{{ url_for('control_scan', project_id=project_id, scan_id=scan.id) }}"
+        {% if action == "stop" %}
+          data-confirm="Stop scan #{{ scan.scan_number }}?"
+          data-confirm-title="Stop scan"
+          data-confirm-body="The current network step may finish first. Partial results collected so far will stay saved."
+          data-confirm-button="Stop scan"
+        {% endif %}>
+    <input type="hidden" name="action" value="{{ action }}">
+    <button class="{{ button_class }}" type="submit">{{ label }}</button>
+  </form>
+{% endmacro %}
 {% block content %}
 <div class="page-heading d-lg-flex justify-content-between align-items-end">
   <div>
@@ -12,21 +24,70 @@
        href="{{ url_for('dashboard', project_id=project.id) }}">Open dashboard</a>
     <a class="btn btn-outline-light {% if scan_runs|length < 2 %}disabled{% endif %}"
        href="{{ url_for('compare_scans', project_id=project.id) }}">Compare latest</a>
-    <form method="post" action="{{ url_for('run_scan', project_id=project.id) }}"
-          data-confirm="Run passive recon now?"
-          data-confirm-title="Run reconnaissance"
-          data-confirm-body="This will start a new passive OSINT scan for {{ project.root_domain }} and store it as a scan history snapshot."
-          data-confirm-button="Start scan"
-          data-busy-label="Running reconnaissance...">
-      <button class="btn btn-accent" type="submit" {% if running_scan %}disabled{% endif %}>
-        <span class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true" data-busy-spinner></span>
-        <span data-busy-text>{{ "Scan running..." if running_scan else "Run reconnaissance" }}</span>
-      </button>
-    </form>
+  </div>
+</div>
+
+<div class="project-status-panel mb-3">
+  <div>
+    <div class="eyebrow">Project status</div>
+    {% if running_scan %}
+      <h2>Scan #{{ running_scan.scan_number }} is {{ running_scan.status|replace("_", " ") }}</h2>
+      <p>
+        {% if running_scan.status == "paused" %}
+          Reconnaissance is paused. Resume it when you are ready to continue collecting data.
+        {% elif running_scan.status == "stopping" %}
+          Stop request received. The current network step may finish before the scan closes.
+        {% else %}
+          Reconnaissance is running. You can pause it or stop it and keep partial results.
+        {% endif %}
+      </p>
+      <span class="status-badge status-{{ running_scan.status }}">{{ running_scan.status|replace("_", " ") }}</span>
+    {% elif latest_scan %}
+      <h2>Idle</h2>
+      <p>Latest completed scan #{{ latest_scan.scan_number }} finished {{ latest_scan.finished_at|display_datetime }}.</p>
+      <span class="status-badge status-completed">Ready for next scan</span>
+    {% else %}
+      <h2>Ready</h2>
+      <p>No scan has been completed yet. Start reconnaissance to populate this project.</p>
+      <span class="status-badge status-stopped">Waiting for first scan</span>
+    {% endif %}
+  </div>
+  <div class="active-scan-controls">
+    {% if running_scan %}
+      {% if running_scan.status == "paused" %}
+        {{ scan_control_button(project.id, running_scan, "resume", "Resume", "btn btn-accent") }}
+      {% elif running_scan.status == "running" %}
+        {{ scan_control_button(project.id, running_scan, "pause", "Pause", "btn btn-outline-light") }}
+      {% endif %}
+      {% if running_scan.status == "stopping" %}
+        <button class="btn btn-outline-danger" type="button" disabled>Stopping...</button>
+      {% else %}
+        {{ scan_control_button(project.id, running_scan, "stop", "Stop", "btn btn-outline-danger") }}
+      {% endif %}
+    {% else %}
+      <form method="post" action="{{ url_for('run_scan', project_id=project.id) }}"
+            data-confirm="Run passive recon now?"
+            data-confirm-title="Run reconnaissance"
+            data-confirm-body="This will start a new passive OSINT scan for {{ project.root_domain }} and store it as a scan history snapshot."
+            data-confirm-button="Start scan"
+            data-busy-label="Starting reconnaissance...">
+        <button class="btn btn-accent" type="submit">
+          <span class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true" data-busy-spinner></span>
+          <span data-busy-text>Run reconnaissance</span>
+        </button>
+      </form>
+    {% endif %}
   </div>
 </div>
 
 {% include "_summary_cards.html" %}
+<div class="summary-context">
+  {% if latest_scan %}
+    Based on latest completed scan #{{ latest_scan.scan_number }} finished {{ latest_scan.finished_at|display_datetime }}.
+  {% else %}
+    No completed scan yet. Run reconnaissance to populate this summary.
+  {% endif %}
+</div>
 
 <div class="row g-4 mt-1">
   <div class="col-12">
@@ -80,14 +141,24 @@
                 {% set scan_summary = item.summary %}
                 <tr>
                   <td>
-                    {% if scan.status != "running" %}
+                    {% if scan.status not in active_scan_statuses %}
                       <input class="form-check-input scan-select" type="checkbox" name="scan_ids"
                              value="{{ scan.id }}" form="scan-bulk-form">
                     {% endif %}
                   </td>
                   <td>#{{ scan.scan_number }}</td>
-                  <td>{{ scan.started_at }}</td>
-                  <td>{{ scan.finished_at or "In progress" }}</td>
+                  <td>{{ scan.started_at|display_datetime }}</td>
+                  <td>
+                    {% if scan.finished_at %}
+                      {{ scan.finished_at|display_datetime }}
+                    {% elif scan.status == "paused" %}
+                      Paused
+                    {% elif scan.status == "stopping" %}
+                      Stopping
+                    {% else %}
+                      In progress
+                    {% endif %}
+                  </td>
                   <td><span class="status-badge status-{{ scan.status }}">{{ scan.status|replace("_", " ") }}</span></td>
                   <td>{{ scan_summary.subdomains }}</td>
                   <td>{{ scan_summary.dns_records }}</td>
@@ -98,7 +169,18 @@
                     <div class="table-actions">
                       <a class="btn btn-sm btn-outline-light"
                          href="{{ url_for('dashboard', project_id=project.id, scan_id=scan.id) }}">Open</a>
-                      {% if scan.status != "running" %}
+                      {% if scan.status in active_scan_statuses %}
+                        {% if scan.status == "paused" %}
+                          {{ scan_control_button(project.id, scan, "resume", "Resume", "btn btn-sm btn-accent") }}
+                        {% elif scan.status == "running" %}
+                          {{ scan_control_button(project.id, scan, "pause", "Pause", "btn btn-sm btn-outline-light") }}
+                        {% endif %}
+                        {% if scan.status == "stopping" %}
+                          <button class="btn btn-sm btn-outline-danger" type="button" disabled>Stopping...</button>
+                        {% else %}
+                          {{ scan_control_button(project.id, scan, "stop", "Stop", "btn btn-sm btn-outline-danger") }}
+                        {% endif %}
+                      {% else %}
                         <form method="post" action="{{ url_for('generate_report', project_id=project.id) }}"
                               data-confirm="Generate an HTML report for scan #{{ scan.scan_number }}?"
                               data-confirm-title="Generate report"

@@ -1,13 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Projects | OSINT Recon Dashboard{% endblock %}
 {% block content %}
-<div class="hero-panel mb-4">
+<div class="hero-panel hero-panel-compact mb-4">
   <div>
-    <div class="eyebrow">Passive reconnaissance workspace</div>
-    <h1>Map the public footprint before the assessment begins.</h1>
-    <p>Create a scoped project, collect public signals, and keep the evidence in one local dashboard.</p>
+    <h1>Your passive reconnaissance tool</h1>
+    <p>Map the public footprint and keep the evidence in one local dashboard.</p>
   </div>
-  <a class="btn btn-accent btn-lg" href="{{ url_for('new_project') }}">Create project</a>
 </div>
 
 <div class="d-flex align-items-center justify-content-between mb-3">
@@ -23,50 +21,107 @@
   </div>
 </div>
 
-{% if projects %}
-  {% if view_mode == "list" %}
-    <div class="panel">
-      <div class="table-responsive">
-        <table class="table table-darkish align-middle mb-0">
-          <thead><tr><th>Project</th><th>Root domain</th><th>Scans</th><th>Last scan</th><th>Actions</th></tr></thead>
-          <tbody>
-            {% for project in projects %}
-              <tr>
-                <td>{{ project.company_name }}</td>
-                <td><span class="domain-pill">{{ project.root_domain }}</span></td>
-                <td>{{ project.scan_count }}</td>
-                <td>{{ project.last_scan or "Never" }}</td>
-                <td><a class="btn btn-sm btn-outline-light" href="{{ url_for('project_detail', project_id=project.id) }}">Open</a></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+{% macro run_scan_form(project, button_class="btn btn-sm btn-outline-light") %}
+  <form method="post" action="{{ url_for('run_scan', project_id=project.id) }}"
+        data-confirm="Run passive recon now?"
+        data-confirm-title="Run reconnaissance"
+        data-confirm-body="This will start a new passive OSINT scan for {{ project.root_domain }}."
+        data-confirm-button="Start scan"
+        data-busy-label="Starting reconnaissance...">
+    <input type="hidden" name="return_to" value="index">
+    <input type="hidden" name="view" value="{{ view_mode }}">
+    <button class="{{ button_class }}" type="submit" {% if project.running_scan_count %}disabled{% endif %}>
+      <span class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true" data-busy-spinner></span>
+      <span data-busy-text>{{ "Scan active" if project.running_scan_count else "Run reconnaissance" }}</span>
+    </button>
+  </form>
+{% endmacro %}
+
+{% macro delete_project_form(project, button_class="btn btn-sm btn-outline-danger") %}
+  <form method="post" action="{{ url_for('delete_project', project_id=project.id) }}"
+        data-confirm="Delete this project and all local data?"
+        data-confirm-title="Delete project"
+        data-confirm-body="This permanently deletes {{ project.root_domain }} from the local database and removes its saved HTML report files. This cannot be undone."
+        data-confirm-button="Delete project">
+    <button class="{{ button_class }}" type="submit">Delete</button>
+  </form>
+{% endmacro %}
+
+{% if view_mode == "list" %}
+  <div class="panel">
+    <div class="table-responsive">
+      <table class="table table-darkish align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Root domain</th>
+            <th>Scans</th>
+            <th>HTML reports</th>
+            <th>Last scan</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for project in projects %}
+            <tr>
+              <td><a class="project-name-link" href="{{ url_for('project_detail', project_id=project.id) }}">{{ project.company_name }}</a></td>
+              <td><span class="domain-pill">{{ project.root_domain }}</span></td>
+              <td>{{ project.scan_count }}</td>
+              <td>{{ project.report_count }}</td>
+              <td>{{ project.last_scan|display_datetime }}</td>
+              <td>
+                <div class="table-actions">
+                  <a class="btn btn-sm btn-outline-light" href="{{ url_for('project_detail', project_id=project.id) }}">Open</a>
+                  {{ run_scan_form(project) }}
+                  {{ delete_project_form(project) }}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+          <tr class="new-project-row">
+            <td colspan="6">
+              <a class="new-project-list-action" href="{{ url_for('new_project') }}">
+                <span>Create new project</span>
+                <strong>+</strong>
+              </a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-  {% else %}
-    <div class="row g-3">
-      {% for project in projects %}
-        <div class="col-md-6 col-xl-4">
-          <a class="project-card" href="{{ url_for('project_detail', project_id=project.id) }}">
-            <div class="d-flex justify-content-between align-items-start">
-              <span class="domain-pill">{{ project.root_domain }}</span>
-              <span class="project-arrow">&rarr;</span>
-            </div>
-            <h3>{{ project.company_name }}</h3>
-            <div class="project-meta">
-              <span>{{ project.scan_count }} scan{% if project.scan_count != 1 %}s{% endif %}</span>
-              <span>Last: {{ project.last_scan or "Never" }}</span>
-            </div>
-          </a>
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
+  </div>
 {% else %}
-  <div class="empty-state">
-    <h2>No projects yet</h2>
-    <p>Start with an organization name and a root domain you are authorized to assess.</p>
-    <a class="btn btn-accent" href="{{ url_for('new_project') }}">Create the first project</a>
+  <div class="row g-3">
+    {% for project in projects %}
+      <div class="col-md-6 col-xl-4">
+        <div class="project-card">
+          <div class="d-flex justify-content-between align-items-start gap-3">
+            <span class="domain-pill">{{ project.root_domain }}</span>
+            <a class="project-open-link" href="{{ url_for('project_detail', project_id=project.id) }}">Open</a>
+          </div>
+          <h3>{{ project.company_name }}</h3>
+          <div class="project-stats">
+            <div><span>Scans</span><strong>{{ project.scan_count }}</strong></div>
+            <div><span>HTML reports</span><strong>{{ project.report_count }}</strong></div>
+          </div>
+          <div class="project-meta">
+            <span>Last scan</span>
+            <strong>{{ project.last_scan|display_datetime }}</strong>
+          </div>
+          <div class="project-actions">
+            {{ run_scan_form(project, "btn btn-sm btn-accent") }}
+            {{ delete_project_form(project) }}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+    <div class="col-md-6 col-xl-4">
+      <a class="project-card new-project-card" href="{{ url_for('new_project') }}">
+        <span class="new-project-plus">+</span>
+        <h3>New project</h3>
+        <p>Create a scoped target and start collecting evidence.</p>
+      </a>
+    </div>
   </div>
 {% endif %}
 {% endblock %}

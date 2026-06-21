@@ -17,6 +17,12 @@ class Config:
     CRTSH_TIMEOUT = int(os.environ.get("CRTSH_TIMEOUT", "30"))
     SCAN_HISTORY_LIMIT = int(os.environ.get("SCAN_HISTORY_LIMIT", "5"))
     REPORT_LIMIT = int(os.environ.get("REPORT_LIMIT", "10"))
+    RUN_SCANS_INLINE = os.environ.get("RUN_SCANS_INLINE", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    SCAN_CONTROL_POLL_INTERVAL = float(os.environ.get("SCAN_CONTROL_POLL_INTERVAL", "1"))
     CRTSH_RETRIES = int(os.environ.get("CRTSH_RETRIES", "2"))
     CRTSH_BACKOFF_FACTOR = float(os.environ.get("CRTSH_BACKOFF_FACTOR", "2"))
     CRTSH_MAX_TIMEOUT = int(os.environ.get("CRTSH_MAX_TIMEOUT", "120"))

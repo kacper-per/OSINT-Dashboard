@@ -345,6 +345,66 @@ def test_running_scan_blocks_duplicate_request(app, client):
         assert database.get_db().execute("SELECT COUNT(*) FROM scan_runs").fetchone()[0] == 1
 
 
+def test_scan_controls_pause_resume_and_stop_active_scan(app, client):
+    create_project(client)
+    with app.app_context():
+        with database.transaction() as db:
+            db.execute(
+                "INSERT INTO scan_runs (project_id, scan_number, started_at, status) VALUES (?, ?, ?, ?)",
+                (1, 1, database.utc_now(), "running"),
+            )
+
+    overview = client.get("/projects/1")
+    assert overview.status_code == 200
+    assert b"Project status" in overview.data
+    assert b"Scan #1 is running" in overview.data
+    assert b"Pause" in overview.data
+    assert b"Stop" in overview.data
+
+    paused = client.post(
+        "/projects/1/scans/1/control",
+        data={"action": "pause"},
+        follow_redirects=True,
+    )
+    assert paused.status_code == 200
+    assert b"Pause requested" in paused.data
+    assert b"Resume" in paused.data
+
+    with app.app_context():
+        row = database.get_db().execute(
+            "SELECT status, control_action FROM scan_runs WHERE id = 1"
+        ).fetchone()
+        assert (row["status"], row["control_action"]) == ("paused", "pause")
+
+    resumed = client.post(
+        "/projects/1/scans/1/control",
+        data={"action": "resume"},
+        follow_redirects=True,
+    )
+    assert resumed.status_code == 200
+    assert b"Scan resumed" in resumed.data
+
+    with app.app_context():
+        row = database.get_db().execute(
+            "SELECT status, control_action FROM scan_runs WHERE id = 1"
+        ).fetchone()
+        assert (row["status"], row["control_action"]) == ("running", "run")
+
+    stopping = client.post(
+        "/projects/1/scans/1/control",
+        data={"action": "stop"},
+        follow_redirects=True,
+    )
+    assert stopping.status_code == 200
+    assert b"Stop requested" in stopping.data
+
+    with app.app_context():
+        row = database.get_db().execute(
+            "SELECT status, control_action FROM scan_runs WHERE id = 1"
+        ).fetchone()
+        assert (row["status"], row["control_action"]) == ("stopping", "stop")
+
+
 def test_compare_latest_with_previous_scan(client):
     create_project(client)
     client.post("/projects/1/scan", follow_redirects=True)
@@ -371,6 +431,8 @@ def test_crtsh_failure_shows_source_diagnostics(monkeypatch, client):
     assert b"Source diagnostics" in scan.data
     assert b"Subdomain discovery failed" in scan.data
     assert b"crt.sh read timeout" in scan.data
+    assert scan.data.index(b"Available scans") < scan.data.index(b"<span>Subdomains</span>")
+    assert scan.data.index(b"<span>Subdomains</span>") < scan.data.index(b"Source diagnostics")
 
 
 def test_compare_marks_incomplete_source_data(monkeypatch, client):
@@ -625,5 +687,52 @@ def test_index_can_render_project_list_view(client):
     response = client.get("/?view=list")
     assert response.status_code == 200
     assert b"Root domain" in response.data
+    assert b"HTML reports" in response.data
+    assert b"Create new project" in response.data
     assert b"example.com" in response.data
     assert b"Cards" in response.data
+
+
+def test_index_project_cards_show_report_count_actions_and_formatted_last_scan(client):
+    create_project(client)
+    client.post("/projects/1/scan", follow_redirects=True)
+    client.post(
+        "/projects/1/reports",
+        data={"scan_id": 1, "report_intent": "generate_report"},
+        follow_redirects=True,
+    )
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert b"Your passive reconnaissance tool" in response.data
+    assert b"Create project" not in response.data
+    assert b"HTML reports" in response.data
+    assert b"Run reconnaissance" in response.data
+    assert b"Delete" in response.data
+    assert b"New project" in response.data
+    assert b"Last scan" in response.data
+    assert b"T" not in response.data.partition(b"Last scan")[2].partition(b"</strong>")[0]
+
+
+def test_run_recon_from_index_returns_to_project_list(client):
+    create_project(client)
+
+    response = client.post(
+        "/projects/1/scan",
+        data={"return_to": "index", "view": "list"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Projects" in response.data
+    assert b"Root domain" in response.data
+    assert b"Passive recon completed successfully" in response.data
+
+
+def test_project_summary_explains_latest_completed_scan_context(client):
+    create_project(client)
+    client.post("/projects/1/scan", follow_redirects=True)
+
+    response = client.get("/projects/1")
+    assert response.status_code == 200
+    assert b"Based on latest completed scan #1" in response.data
