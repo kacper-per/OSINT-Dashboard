@@ -1,10 +1,7 @@
 # OSINT Recon Dashboard
 
 A beginner-friendly local Flask application for the first, passive phase of an
-authorized security assessment. Create a project for an organization and root
-domain, run public-source reconnaissance, review normalized findings in a
-dashboard, compare recent scan history, and export standalone HTML report
-snapshots.
+authorized security assessment.
 
 The working MVP uses only free public sources and free Python libraries. It
 does not require API keys or paid services.
@@ -14,13 +11,13 @@ does not require API keys or paid services.
 - Public DNS records: A, AAAA, MX, NS, TXT, and CNAME
 - Subdomains found in the free crt.sh certificate-transparency feed
 - Basic HTTP/HTTPS availability, redirects, page titles, and Server headers
-- Six common HTTP security headers
+- Six common HTTP security headers (More in future...)
 - Public WHOIS data
 - Publicly presented TLS certificate details and SAN names
-- Email addresses displayed on the root-domain homepage
+- Email addresses displayed on the root-domain homepage (and more on demand)
 - Optional deep email search across in-scope HTML pages for a selected scan
 
-Results are deduplicated per scan and stored locally in SQLite. A failed module
+Results are saved and stored locally in SQLite. A failed module
 does not stop the rest of a scan; warnings are saved under **Raw Results** and
 the scan is marked `completed_with_errors`.
 
@@ -29,11 +26,7 @@ the scan is marked `completed_with_errors`.
 This tool performs passive OSINT reconnaissance using public sources and basic
 non-invasive HTTP checks. It does not exploit vulnerabilities, brute-force
 credentials, attack systems, bypass authentication, or perform aggressive
-scanning. It should only be used for educational purposes, authorized
-assessments, or domains owned/approved by the user.
-
-Public data may be stale, incomplete, redacted, or misleading. Treat the output
-as assessment input, not proof of a vulnerability.
+scanning.
 
 ## Setup
 
@@ -139,7 +132,9 @@ pytest
 ## Design and Limitations
 
 - Scans run synchronously in the Flask development process. The scan button is
-  disabled after submit, but keep the browser tab open until the scan completes.
+  replaced by stop and pause buttons.
+- Scans can be paused or stopped, but the action takes effect only after 
+  the currently running module finishes.
 - The application keeps the latest scan result snapshots per project according
   to `SCAN_HISTORY_LIMIT`; older scan results are pruned.
 - HTML reports are independent snapshots and are kept according to
@@ -154,6 +149,6 @@ pytest
 - Bootstrap and Chart.js are loaded from public CDNs. The application and its
   evidence tables still function if Chart.js is unavailable.
 
-Future improvements could add background jobs, local vendored UI assets,
-authenticated user accounts, or optional integrations. Paid APIs are
-deliberately outside this MVP.
+Future improvements could add selection of security headers by user, option to restart
+only part of the scan (for example, only one module if it's failed) amd
+authenticated user accounts.
